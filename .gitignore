@@ -1,0 +1,15 @@
+# Среда разработки
+venv/
+__pycache__/
+
+# Файлы сборки PyInstaller
+build/
+dist/
+*.spec
+
+# Файлы конфигурации и логи (чтобы чужие настройки не летели в сеть)
+phantom_config.json
+CRASH_LOG.txt
+
+# Системные файлы Windows
+Thumbs.db
