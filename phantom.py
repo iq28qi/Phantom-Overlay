@@ -21,7 +21,8 @@ from PyQt6.QtWidgets import (
     QMenu, QStyle, QDialog, QFormLayout, QSlider, QPushButton, QFileDialog,
     QCheckBox, QHBoxLayout, QLineEdit, QSpinBox, QListWidget,
     QListWidgetItem, QColorDialog, QGraphicsDropShadowEffect, QSizePolicy,
-    QFrame, QTextEdit, QStackedWidget, QToolButton
+    QFrame, QTextEdit, QStackedWidget, QToolButton, QScrollArea, QGridLayout,
+    QComboBox, QMessageBox, QDoubleSpinBox
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QPoint, QPointF, QPropertyAnimation, QEasingCurve,
@@ -29,7 +30,8 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QAction, QIcon, QColor, QPainter, QLinearGradient, QRadialGradient,
-    QPen, QBrush, QPainterPath, QFont, QPixmap, QImage
+    QPen, QBrush, QPainterPath, QFont, QPixmap, QImage, QConicalGradient,
+    QKeySequence
 )
 
 try:
@@ -42,28 +44,57 @@ except ImportError:
 
 
 # ==========================================================
-#                      НАСТРОЙКИ (CONFIG)
+#                      КОНФИГУРАЦИЯ
 # ==========================================================
 CONFIG_FILE = "phantom_config.json"
 
-APP_VERSION = "4.2.0 — Premium Edition"
+APP_VERSION = "5.0.0 — Hyper Edition"
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict = {
+    # --- core ---
     "opacity": 235,
     "theme": "dark",
     "bg_image": "",
     "accent_color": "#00ff99",
-    "show_ai": True,
-    "smart_hide": False,
-    "enable_voice": True,
-    "show_in_taskbar": False,
-    "show_sparklines": True,
-    "show_network_rate": True,
-    "compact_mode": False,
     "hotkey_toggle": "ctrl+shift+p",
+    "hotkey_settings": "ctrl+shift+o",
     "update_interval_ms": 1000,
     "pos_x": 100,
     "pos_y": 100,
+    # --- widget visibility ---
+    "show_gpu": True,
+    "show_cpu": True,
+    "show_ram": True,
+    "show_network": True,
+    "show_music": True,
+    "show_visualizer": True,
+    "show_ai": True,
+    "show_battery": True,
+    "show_disk_io": True,
+    "show_cpu_temp": True,
+    "show_sparklines": True,
+    "show_in_taskbar": False,
+    # --- behaviour ---
+    "smart_hide": False,
+    "enable_voice": True,
+    "compact_mode": False,
+    "corner_snap": "none",   # none | tl | tr | bl | br
+    "corner_margin": 24,
+    # --- visual flair ---
+    "animated_border": True,
+    "particles": True,
+    "font_scale": 1.0,
+    # --- thresholds (warn/critical) ---
+    "cpu_warn": 80, "cpu_crit": 95,
+    "ram_warn": 80, "ram_crit": 92,
+    "gpu_warn": 75, "gpu_crit": 85,
+    "ping_warn": 60, "ping_crit": 120,
+    # --- preset name (meta) ---
+    "theme_preset": "Neon Mint",
+    # --- discord ---
+    "discord_enabled": False,
+    "discord_client_id": "",
+    # --- games ---
     "target_games": [
         "CS2", "Counter-Strike", "Dota 2", "Genshin Impact", "Minecraft",
         "GTA 5", "Cyberpunk 2077", "Valorant", "Fortnite", "Apex Legends",
@@ -71,29 +102,42 @@ DEFAULT_CONFIG = {
 }
 
 
+# Theme presets — применяются к config поверх текущих значений.
+THEME_PRESETS: dict = {
+    "Neon Mint":   {"accent_color": "#00ff99", "opacity": 235, "animated_border": True,  "particles": True,  "compact_mode": False, "bg_image": ""},
+    "Ultraviolet": {"accent_color": "#a78bfa", "opacity": 235, "animated_border": True,  "particles": True,  "compact_mode": False, "bg_image": ""},
+    "Cyber Cyan":  {"accent_color": "#22d3ee", "opacity": 240, "animated_border": True,  "particles": True,  "compact_mode": False, "bg_image": ""},
+    "Magma":       {"accent_color": "#ff7a59", "opacity": 230, "animated_border": True,  "particles": False, "compact_mode": False, "bg_image": ""},
+    "Sakura":      {"accent_color": "#ff6ba8", "opacity": 225, "animated_border": True,  "particles": True,  "compact_mode": True,  "bg_image": ""},
+    "Matrix":      {"accent_color": "#29ff7a", "opacity": 245, "animated_border": True,  "particles": True,  "compact_mode": False, "bg_image": ""},
+    "Stealth":     {"accent_color": "#9aa4c7", "opacity": 210, "animated_border": False, "particles": False, "compact_mode": True,  "bg_image": ""},
+    "Gold":        {"accent_color": "#f5c24c", "opacity": 235, "animated_border": True,  "particles": True,  "compact_mode": False, "bg_image": ""},
+}
+
+
 def log_err(prefix: str, exc: BaseException) -> None:
-    """Единая точка логирования ошибок — без голых except."""
+    """Единая точка логирования ошибок."""
     try:
         sys.stderr.write(f"[phantom][{prefix}] {type(exc).__name__}: {exc}\n")
     except Exception:
         pass
 
 
-def load_config():
+def load_config() -> dict:
+    cfg = {**DEFAULT_CONFIG, "target_games": list(DEFAULT_CONFIG["target_games"])}
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            merged = {**DEFAULT_CONFIG, **data}
-            games = merged.get("target_games") or DEFAULT_CONFIG["target_games"]
-            merged["target_games"] = [str(g).strip() for g in games if str(g).strip()]
-            return merged
+            cfg.update(data)
+            games = cfg.get("target_games") or DEFAULT_CONFIG["target_games"]
+            cfg["target_games"] = [str(g).strip() for g in games if str(g).strip()]
         except (OSError, json.JSONDecodeError) as e:
             log_err("config.load", e)
-    return {**DEFAULT_CONFIG, "target_games": list(DEFAULT_CONFIG["target_games"])}
+    return cfg
 
 
-def save_config(config):
+def save_config(config: dict) -> None:
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
@@ -102,7 +146,7 @@ def save_config(config):
 
 
 # ==========================================================
-#               ПАЛИТРА / УТИЛЬНЫЕ ФУНКЦИИ
+#              ПАЛИТРА / ВСПОМОГАТЕЛЬНЫЕ
 # ==========================================================
 def _mix(c1: QColor, c2: QColor, t: float) -> QColor:
     t = max(0.0, min(1.0, t))
@@ -114,29 +158,38 @@ def _mix(c1: QColor, c2: QColor, t: float) -> QColor:
     )
 
 
-def _color_for_load(percent: float, accent: QColor) -> QColor:
-    """Градиентный цвет по загрузке: accent → yellow → red."""
+def _color_for_load(percent: float, accent: QColor, warn: float = 70, crit: float = 90) -> QColor:
     yellow = QColor("#ffcc66")
     red = QColor("#ff5c5c")
-    if percent < 70:
-        return _mix(accent, yellow, (percent / 70.0) * 0.35)
-    if percent < 90:
-        return _mix(yellow, red, (percent - 70) / 20.0)
+    if percent < warn:
+        return _mix(accent, yellow, (percent / max(1.0, warn)) * 0.35)
+    if percent < crit:
+        return _mix(yellow, red, (percent - warn) / max(1.0, crit - warn))
     return red
 
 
-def _color_for_temp(temp: int, accent: QColor) -> QColor:
-    if temp <= 55:
+def _color_for_temp(temp: int, accent: QColor, warn: int = 70, crit: int = 85) -> QColor:
+    cool = QColor("#4cd9ff")
+    if temp <= 45:
+        return _mix(cool, accent, temp / 45.0)
+    if temp <= warn:
         return accent
-    if temp <= 75:
-        return _mix(accent, QColor("#ffcc66"), (temp - 55) / 20.0)
-    if temp <= 85:
-        return _mix(QColor("#ffcc66"), QColor("#ff5c5c"), (temp - 75) / 10.0)
+    if temp <= crit:
+        return _mix(accent, QColor("#ffcc66"), (temp - warn) / max(1, crit - warn))
     return QColor("#ff5c5c")
 
 
+def _fmt_bytes(v: float) -> str:
+    v = float(v)
+    for unit in ("B", "KB", "MB", "GB"):
+        if v < 1024 or unit == "GB":
+            return f"{v:.0f} {unit}" if unit == "B" else f"{v:.1f} {unit}"
+        v /= 1024.0
+    return f"{v:.1f} GB"
+
+
 # ==========================================================
-#               ЯДРО АССИСТЕНТА И DISCORD
+#               ЯДРО АССИСТЕНТА / DISCORD
 # ==========================================================
 class PhantomCore:
     def __init__(self):
@@ -150,8 +203,8 @@ class PhantomCore:
         self.rpc = None
         self.discord_connected = False
 
-    def init_discord(self, client_id: str):
-        if not client_id or "CLIENT_ID" in client_id:
+    def init_discord(self, client_id: str) -> None:
+        if not client_id:
             return
         try:
             self.rpc = Presence(client_id)
@@ -161,7 +214,7 @@ class PhantomCore:
             log_err("discord.connect", e)
             self.discord_connected = False
 
-    def update_discord(self, state, details):
+    def update_discord(self, state: str, details: str) -> None:
         if not (self.discord_connected and self.rpc):
             return
         try:
@@ -169,7 +222,7 @@ class PhantomCore:
         except Exception as e:
             log_err("discord.update", e)
 
-    def say(self, text):
+    def say(self, text: str) -> None:
         if self.engine is None:
             return
         if time.time() - self.last_speech_time < 15:
@@ -200,6 +253,8 @@ class HardwareMonitorThread(QThread):
         self.loop = asyncio.new_event_loop()
         self._prev_net = None
         self._prev_net_time = None
+        self._prev_disk = None
+        self._prev_disk_time = None
         try:
             import pynvml
             pynvml.nvmlInit()
@@ -225,9 +280,32 @@ class HardwareMonitorThread(QThread):
                 data["ram"] = psutil.virtual_memory().percent
             except Exception as e:
                 log_err("psutil", e)
-                data["cpu"] = random.randint(18, 25)
-                data["ram"] = random.randint(45, 50)
+                data["cpu"] = 0; data["ram"] = 0
 
+            # CPU temp (best-effort, cross-platform)
+            data["cpu_temp"] = None
+            try:
+                if hasattr(psutil, "sensors_temperatures"):
+                    temps = psutil.sensors_temperatures()
+                    for key in ("coretemp", "cpu_thermal", "k10temp", "acpitz"):
+                        if key in temps and temps[key]:
+                            data["cpu_temp"] = int(temps[key][0].current)
+                            break
+            except Exception as e:
+                log_err("cpu_temp", e)
+
+            # Battery (laptops)
+            data["battery_percent"] = None
+            data["battery_plugged"] = None
+            try:
+                bat = psutil.sensors_battery()
+                if bat is not None:
+                    data["battery_percent"] = int(bat.percent)
+                    data["battery_plugged"] = bool(bat.power_plugged)
+            except Exception as e:
+                log_err("battery", e)
+
+            # GPU (NVIDIA)
             if self.nvml_initialized:
                 try:
                     data["gpu_temp"] = self.pynvml.nvmlDeviceGetTemperature(
@@ -242,6 +320,7 @@ class HardwareMonitorThread(QThread):
             else:
                 data["gpu_temp"], data["gpu_util"] = None, None
 
+            # Ping
             try:
                 p = ping("8.8.8.8", timeout=1)
                 data["ping"] = int(p * 1000) if p else None
@@ -249,6 +328,7 @@ class HardwareMonitorThread(QThread):
                 log_err("ping", e)
                 data["ping"] = None
 
+            # Network rates
             try:
                 counters = psutil.net_io_counters()
                 now = time.time()
@@ -264,12 +344,31 @@ class HardwareMonitorThread(QThread):
                 log_err("net", e)
                 data["net_up"], data["net_down"] = 0.0, 0.0
 
+            # Disk I/O
+            try:
+                dio = psutil.disk_io_counters()
+                now = time.time()
+                if dio is not None and self._prev_disk is not None and self._prev_disk_time is not None:
+                    dt = max(0.001, now - self._prev_disk_time)
+                    data["disk_read"] = (dio.read_bytes - self._prev_disk.read_bytes) / dt
+                    data["disk_write"] = (dio.write_bytes - self._prev_disk.write_bytes) / dt
+                else:
+                    data["disk_read"], data["disk_write"] = 0.0, 0.0
+                if dio is not None:
+                    self._prev_disk = dio
+                    self._prev_disk_time = now
+            except Exception as e:
+                log_err("disk", e)
+                data["disk_read"], data["disk_write"] = 0.0, 0.0
+
+            # Music
             try:
                 data["music"] = self.loop.run_until_complete(self.get_music_info())
             except Exception as e:
                 log_err("media", e)
                 data["music"] = "No Media"
 
+            # Active window
             try:
                 win = gw.getActiveWindow()
                 data["active_title"] = win.title if win else ""
@@ -285,25 +384,23 @@ class HardwareMonitorThread(QThread):
 
     async def get_music_info(self):
         if not HAS_WINSDK:
-            return "Media API unavailable"
+            return ""
         try:
             sessions = await SessionManager.request_async()
             curr = sessions.get_current_session()
             if curr:
                 info = await curr.try_get_media_properties_async()
                 return f"{info.artist or 'Unknown'} — {info.title or 'Track'}"
-            return "⏸ Тишина"
+            return ""
         except Exception as e:
             log_err("winsdk.media", e)
-            return "No Media"
+            return ""
 
 
 # ==========================================================
-#                   ПРЕМИУМ ВИДЖЕТЫ
+#                   ВИДЖЕТЫ: БАЗОВЫЕ
 # ==========================================================
 class Sparkline(QWidget):
-    """Мини-график с мягкой заливкой и сглаживанием."""
-
     def __init__(self, capacity: int = 60, color: str = "#00ff99", parent=None):
         super().__init__(parent)
         self._buf: deque[float] = deque(maxlen=capacity)
@@ -330,26 +427,21 @@ class Sparkline(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        w = self.width()
-        h = self.height()
+        w = self.width(); h = self.height()
         n = self._buf.maxlen or 60
         step = w / (n - 1)
-
         start_x = w - step * (len(self._buf) - 1)
         pts = []
         for i, v in enumerate(self._buf):
             x = start_x + i * step
             y = h - (v / 100.0) * (h - 2) - 1
             pts.append(QPointF(x, y))
-
         if not pts:
             return
 
-        # gradient-filled area under curve
         fill_path = QPainterPath()
         fill_path.moveTo(pts[0].x(), h)
-        fill_path.lineTo(pts[0])
-        for p in pts[1:]:
+        for p in pts:
             fill_path.lineTo(p)
         fill_path.lineTo(pts[-1].x(), h)
         fill_path.closeSubpath()
@@ -361,9 +453,7 @@ class Sparkline(QWidget):
         grad.setColorAt(1.0, c2)
         painter.fillPath(fill_path, QBrush(grad))
 
-        # line
-        line_path = QPainterPath()
-        line_path.moveTo(pts[0])
+        line_path = QPainterPath(); line_path.moveTo(pts[0])
         for p in pts[1:]:
             line_path.lineTo(p)
         pen = QPen(self._color)
@@ -374,310 +464,7 @@ class Sparkline(QWidget):
         painter.drawPath(line_path)
 
 
-class MetricCard(QWidget):
-    """Премиум-карточка с иконкой, именем метрики, большим числом, gradient-прогрессом и sparkline."""
-
-    def __init__(self, icon: str, name: str, unit: str = "%",
-                 accent: str = "#00ff99", show_sparkline: bool = True, parent=None):
-        super().__init__(parent)
-        self._icon = icon
-        self._name = name
-        self._unit = unit
-        self._accent = QColor(accent)
-        self._value_anim = 0.0      # animated percent for bar fill
-        self._value_target = 0.0
-        self._value_text = "--"
-        self._secondary_text = ""
-        self._critical = False
-
-        self._anim = QPropertyAnimation(self, b"animatedValue")
-        self._anim.setDuration(450)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self._build_ui(show_sparkline)
-
-    # ---------- animated property ----------
-    def get_animated_value(self) -> float:
-        return self._value_anim
-
-    def set_animated_value(self, v: float) -> None:
-        self._value_anim = max(0.0, min(100.0, float(v)))
-        self.update()
-
-    animatedValue = pyqtProperty(float, fget=get_animated_value, fset=set_animated_value)
-
-    # ---------- ui ----------
-    def _build_ui(self, show_sparkline: bool) -> None:
-        self.setMinimumHeight(64)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(14, 10, 14, 10)
-        root.setSpacing(4)
-
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(8)
-
-        self.lbl_icon = QLabel(self._icon)
-        self.lbl_icon.setStyleSheet(
-            "font-family: 'Segoe UI'; font-size: 14px;"
-        )
-        self.lbl_name = QLabel(self._name)
-        self.lbl_name.setStyleSheet(
-            "color: rgba(255,255,255,170); font-family: 'Segoe UI'; "
-            "font-size: 10px; font-weight: 800; letter-spacing: 1.8px;"
-        )
-        self.lbl_value = QLabel("--")
-        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-        font = QFont("Segoe UI", 15)
-        font.setWeight(QFont.Weight.Black)
-        self.lbl_value.setFont(font)
-        self.lbl_value.setStyleSheet(f"color: {self._accent.name()};")
-
-        self.lbl_secondary = QLabel("")
-        self.lbl_secondary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.lbl_secondary.setStyleSheet(
-            "color: rgba(255,255,255,120); font-family: 'Segoe UI'; "
-            "font-size: 10px; font-weight: 600;"
-        )
-
-        left_box = QVBoxLayout()
-        left_box.setContentsMargins(0, 0, 0, 0)
-        left_box.setSpacing(0)
-        name_row = QHBoxLayout()
-        name_row.setContentsMargins(0, 0, 0, 0)
-        name_row.setSpacing(6)
-        name_row.addWidget(self.lbl_icon)
-        name_row.addWidget(self.lbl_name)
-        name_row.addStretch(1)
-        left_box.addLayout(name_row)
-        left_box.addWidget(self.lbl_secondary)
-
-        right_box = QVBoxLayout()
-        right_box.setContentsMargins(0, 0, 0, 0)
-        right_box.setSpacing(0)
-        right_box.addStretch(1)
-        right_box.addWidget(self.lbl_value)
-
-        top.addLayout(left_box, 1)
-        top.addLayout(right_box, 0)
-        root.addLayout(top)
-
-        self.sparkline = Sparkline(color=self._accent.name())
-        self.sparkline.setVisible(show_sparkline)
-        root.addWidget(self.sparkline)
-
-    # ---------- api ----------
-    def set_accent(self, color: str) -> None:
-        self._accent = QColor(color)
-        self.sparkline.set_color(color)
-        self._refresh_value_style()
-        self.update()
-
-    def set_sparkline_visible(self, visible: bool) -> None:
-        self.sparkline.setVisible(visible)
-
-    def set_value(self, percent: float, text: str, secondary: str = "",
-                  critical: bool = False) -> None:
-        try:
-            self._value_target = max(0.0, min(100.0, float(percent)))
-        except (TypeError, ValueError):
-            self._value_target = 0.0
-        self._value_text = text
-        self._secondary_text = secondary
-        self._critical = bool(critical)
-
-        self.lbl_value.setText(text)
-        self.lbl_secondary.setText(secondary)
-        self._refresh_value_style()
-        self.sparkline.push(self._value_target)
-
-        self._anim.stop()
-        self._anim.setStartValue(self._value_anim)
-        self._anim.setEndValue(self._value_target)
-        self._anim.start()
-
-    def _refresh_value_style(self) -> None:
-        color = _color_for_load(self._value_target, self._accent)
-        if self._critical:
-            color = QColor("#ff5c5c")
-        self.lbl_value.setStyleSheet(f"color: {color.name()};")
-
-    # ---------- paint ----------
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w = self.width()
-        h = self.height()
-        radius = 12.0
-
-        # ---- card bg ----
-        bg = QLinearGradient(0, 0, 0, h)
-        bg.setColorAt(0.0, QColor(30, 30, 40, 235))
-        bg.setColorAt(1.0, QColor(18, 18, 26, 235))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(bg))
-        painter.drawRoundedRect(QRectF(0, 0, w, h), radius, radius)
-
-        # ---- 1px inner highlight (top) ----
-        hi = QPen(QColor(255, 255, 255, 22))
-        hi.setWidthF(1.0)
-        painter.setPen(hi)
-        painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
-
-        # ---- progress track ----
-        track_h = 4.0
-        track_y = h - track_h - 8  # above sparkline space; we'll draw track inside bottom area under values
-        track_rect = QRectF(14, h - 4 - 0, w - 28, 0)  # placeholder unused
-        # better: put slim track near bottom-card edge, just above sparkline area
-        spark_h = 22.0 if self.sparkline.isVisible() else 0.0
-        track_y = h - spark_h - 10
-        track_rect = QRectF(14, track_y, w - 28, track_h)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 30))
-        painter.drawRoundedRect(track_rect, track_h / 2, track_h / 2)
-
-        # filled portion
-        filled_w = (self._value_anim / 100.0) * (w - 28)
-        if filled_w > 1.0:
-            fill_rect = QRectF(14, track_y, filled_w, track_h)
-            fg_color = _color_for_load(self._value_anim, self._accent)
-            if self._critical:
-                fg_color = QColor("#ff5c5c")
-            glow_grad = QLinearGradient(14, 0, 14 + filled_w, 0)
-            c_start = QColor(fg_color); c_start.setAlpha(230)
-            c_end = QColor(fg_color); c_end.setAlpha(255)
-            glow_grad.setColorAt(0.0, c_start)
-            glow_grad.setColorAt(1.0, c_end)
-            painter.setBrush(QBrush(glow_grad))
-            painter.drawRoundedRect(fill_rect, track_h / 2, track_h / 2)
-
-            # subtle accent glow dot at end
-            dot_r = 5.0
-            dot = QRadialGradient(14 + filled_w, track_y + track_h / 2, dot_r * 2)
-            g_in = QColor(fg_color); g_in.setAlpha(200)
-            g_out = QColor(fg_color); g_out.setAlpha(0)
-            dot.setColorAt(0.0, g_in)
-            dot.setColorAt(1.0, g_out)
-            painter.setBrush(QBrush(dot))
-            painter.drawEllipse(QPointF(14 + filled_w, track_y + track_h / 2),
-                                dot_r * 2, dot_r * 2)
-
-
-class CircularGauge(QWidget):
-    """Круговой индикатор: внешнее кольцо + температура в центре + подпись."""
-
-    def __init__(self, accent: str = "#00ff99", parent=None):
-        super().__init__(parent)
-        self._accent = QColor(accent)
-        self._temp = 0
-        self._util = 0
-        self._anim_util = 0.0
-        self._available = False
-        self.setFixedSize(96, 96)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-
-        self._anim = QPropertyAnimation(self, b"animatedUtil")
-        self._anim.setDuration(450)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-    def get_animated_util(self) -> float:
-        return self._anim_util
-
-    def set_animated_util(self, v: float) -> None:
-        self._anim_util = max(0.0, min(100.0, float(v)))
-        self.update()
-
-    animatedUtil = pyqtProperty(float, fget=get_animated_util, fset=set_animated_util)
-
-    def set_accent(self, color: str) -> None:
-        self._accent = QColor(color)
-        self.update()
-
-    def set_values(self, temp, util) -> None:
-        if temp is None or util is None:
-            self._available = False
-            self.update()
-            return
-        self._available = True
-        self._temp = int(temp)
-        new_util = int(util)
-        self._anim.stop()
-        self._anim.setStartValue(self._anim_util)
-        self._anim.setEndValue(float(new_util))
-        self._anim.start()
-        self._util = new_util
-
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w = self.width()
-        h = self.height()
-        cx, cy = w / 2.0, h / 2.0
-        radius = min(w, h) / 2.0 - 6.0
-
-        # background ring
-        track_pen = QPen(QColor(255, 255, 255, 32))
-        track_pen.setWidth(6)
-        track_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
-        painter.setPen(track_pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(QPointF(cx, cy), radius, radius)
-
-        color = _color_for_temp(self._temp if self._available else 40, self._accent)
-
-        # glow behind arc
-        glow = QRadialGradient(cx, cy, radius + 8)
-        g1 = QColor(color); g1.setAlpha(0)
-        g2 = QColor(color); g2.setAlpha(60)
-        g3 = QColor(color); g3.setAlpha(0)
-        glow.setColorAt(0.55, g1)
-        glow.setColorAt(0.75, g2)
-        glow.setColorAt(1.0, g3)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(glow))
-        painter.drawEllipse(QPointF(cx, cy), radius + 8, radius + 8)
-
-        # progress arc (top, clockwise)
-        rect = QRectF(cx - radius, cy - radius, radius * 2, radius * 2)
-        arc_pen = QPen(color)
-        arc_pen.setWidth(6)
-        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(arc_pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        # Qt angles are 1/16 degrees; start at 90° (top), sweep clockwise negative
-        start_angle = 90 * 16
-        span = -int((self._anim_util / 100.0) * 360 * 16) if self._available else 0
-        painter.drawArc(rect, start_angle, span)
-
-        # center text — temperature
-        painter.setPen(QColor(255, 255, 255, 240))
-        font_big = QFont("Segoe UI", 18)
-        font_big.setWeight(QFont.Weight.Black)
-        painter.setFont(font_big)
-        if self._available:
-            txt = f"{self._temp}°"
-        else:
-            txt = "N/A"
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, txt)
-
-        # label "GPU"
-        painter.setPen(QColor(255, 255, 255, 130))
-        font_lbl = QFont("Segoe UI", 8)
-        font_lbl.setWeight(QFont.Weight.ExtraBold)
-        font_lbl.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.0)
-        painter.setFont(font_lbl)
-        lbl_rect = QRectF(rect.left(), rect.bottom() - 26, rect.width(), 14)
-        painter.drawText(lbl_rect, Qt.AlignmentFlag.AlignCenter, "GPU")
-
-
 class StatusDot(QWidget):
-    """Пульсирующая точка-индикатор."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self._color = QColor("#00ff99")
@@ -685,50 +472,35 @@ class StatusDot(QWidget):
         self.setFixedSize(14, 14)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(60)
+        self._timer.start(80)
 
     def set_color(self, color: str) -> None:
-        self._color = QColor(color)
-        self.update()
+        self._color = QColor(color); self.update()
 
     def _tick(self) -> None:
-        self._pulse = (self._pulse + 0.06) % (2 * math.pi)
+        self._pulse = (self._pulse + 0.08) % (2 * math.pi)
         self.update()
 
     def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w = self.width()
-        h = self.height()
-        cx, cy = w / 2, h / 2
-
-        # halo
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
         alpha = int(60 + 80 * (0.5 + 0.5 * math.sin(self._pulse)))
-        halo_grad = QRadialGradient(cx, cy, w / 2)
-        halo_in = QColor(self._color); halo_in.setAlpha(alpha)
-        halo_out = QColor(self._color); halo_out.setAlpha(0)
-        halo_grad.setColorAt(0.0, halo_in)
-        halo_grad.setColorAt(1.0, halo_out)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(halo_grad))
-        painter.drawEllipse(0, 0, w, h)
-
-        # core
-        core = QColor(self._color)
-        painter.setBrush(core)
-        painter.drawEllipse(int(w / 2 - 3), int(h / 2 - 3), 6, 6)
+        halo = QRadialGradient(w/2, h/2, w/2)
+        c_in = QColor(self._color); c_in.setAlpha(alpha)
+        c_out = QColor(self._color); c_out.setAlpha(0)
+        halo.setColorAt(0.0, c_in); halo.setColorAt(1.0, c_out)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(halo))
+        p.drawEllipse(0, 0, w, h)
+        p.setBrush(QColor(self._color))
+        p.drawEllipse(int(w/2 - 3), int(h/2 - 3), 6, 6)
 
 
 class IconButton(QToolButton):
-    """Мини-кнопка в хедере."""
-
     def __init__(self, glyph: str, tooltip: str, parent=None):
         super().__init__(parent)
-        self.setText(glyph)
-        self.setToolTip(tooltip)
+        self.setText(glyph); self.setToolTip(tooltip)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAutoRaise(True)
-        self.setFixedSize(22, 22)
+        self.setAutoRaise(True); self.setFixedSize(22, 22)
         self.setStyleSheet(
             """
             QToolButton {
@@ -749,8 +521,6 @@ class IconButton(QToolButton):
 
 
 class Marquee(QLabel):
-    """Плавная бегущая строка для длинных треков."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self._full = ""
@@ -777,233 +547,1175 @@ class Marquee(QLabel):
     def paintEvent(self, event):
         if not self._timer.isActive():
             return super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setPen(self.palette().color(self.foregroundRole()))
-        painter.setFont(self.font())
+        p = QPainter(self)
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.setFont(self.font())
         text = self._full + "     " + self._full
         fm = self.fontMetrics()
         y = (self.height() + fm.ascent() - fm.descent()) // 2
-        painter.drawText(-self._offset, y, text)
+        p.drawText(-self._offset, y, text)
+
+
+class Chip(QLabel):
+    """Стильный pill-chip для вторичных метрик (battery / disk / cpu temp)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._accent = "#00ff99"
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        f = QFont("Segoe UI", 9); f.setWeight(QFont.Weight.ExtraBold)
+        self.setFont(f)
+        self._refresh()
+
+    def set_accent(self, color: str) -> None:
+        self._accent = color; self._refresh()
+
+    def _refresh(self) -> None:
+        self.setStyleSheet(
+            "color: rgba(255,255,255,210); "
+            "background: rgba(255,255,255,12); "
+            "border: 1px solid rgba(255,255,255,24); "
+            "border-radius: 9px; padding: 3px 10px;"
+        )
 
 
 # ==========================================================
-#          PREMIUM ДИАЛОГ НАСТРОЕК (SIDEBAR NAV)
+#                 ВИДЖЕТЫ: МЕТРИКИ
+# ==========================================================
+class MetricCard(QWidget):
+    def __init__(self, icon: str, name: str, accent: str = "#00ff99",
+                 show_sparkline: bool = True,
+                 warn: float = 80.0, crit: float = 95.0, parent=None):
+        super().__init__(parent)
+        self._icon = icon; self._name = name
+        self._accent = QColor(accent)
+        self._warn = warn; self._crit = crit
+        self._value_anim = 0.0
+        self._value_target = 0.0
+        self._value_text = "--"; self._secondary_text = ""
+        self._critical = False
+        self._anim = QPropertyAnimation(self, b"animatedValue")
+        self._anim.setDuration(500)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._build_ui(show_sparkline)
+
+    def get_animated_value(self) -> float: return self._value_anim
+    def set_animated_value(self, v: float) -> None:
+        self._value_anim = max(0.0, min(100.0, float(v)))
+        self.update()
+    animatedValue = pyqtProperty(float, fget=get_animated_value, fset=set_animated_value)
+
+    def _build_ui(self, show_sparkline: bool) -> None:
+        self.setMinimumHeight(64)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 10, 14, 10); root.setSpacing(4)
+        top = QHBoxLayout(); top.setContentsMargins(0, 0, 0, 0); top.setSpacing(8)
+
+        self.lbl_icon = QLabel(self._icon)
+        self.lbl_icon.setStyleSheet("font-family: 'Segoe UI'; font-size: 14px;")
+        self.lbl_name = QLabel(self._name)
+        self.lbl_name.setStyleSheet(
+            "color: rgba(255,255,255,170); font-family: 'Segoe UI'; "
+            "font-size: 10px; font-weight: 800; letter-spacing: 1.8px;"
+        )
+        self.lbl_value = QLabel("--")
+        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        f = QFont("Segoe UI", 15); f.setWeight(QFont.Weight.Black)
+        self.lbl_value.setFont(f)
+        self.lbl_value.setStyleSheet(f"color: {self._accent.name()};")
+
+        self.lbl_secondary = QLabel("")
+        self.lbl_secondary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_secondary.setStyleSheet(
+            "color: rgba(255,255,255,120); font-family: 'Segoe UI'; "
+            "font-size: 10px; font-weight: 600;"
+        )
+
+        left = QVBoxLayout(); left.setContentsMargins(0, 0, 0, 0); left.setSpacing(0)
+        name_row = QHBoxLayout(); name_row.setContentsMargins(0, 0, 0, 0); name_row.setSpacing(6)
+        name_row.addWidget(self.lbl_icon); name_row.addWidget(self.lbl_name); name_row.addStretch(1)
+        left.addLayout(name_row); left.addWidget(self.lbl_secondary)
+
+        right = QVBoxLayout(); right.setContentsMargins(0, 0, 0, 0); right.setSpacing(0)
+        right.addStretch(1); right.addWidget(self.lbl_value)
+
+        top.addLayout(left, 1); top.addLayout(right, 0)
+        root.addLayout(top)
+
+        self.sparkline = Sparkline(color=self._accent.name())
+        self.sparkline.setVisible(show_sparkline)
+        root.addWidget(self.sparkline)
+
+    def set_accent(self, color: str) -> None:
+        self._accent = QColor(color)
+        self.sparkline.set_color(color)
+        self._refresh_value_style()
+        self.update()
+
+    def set_sparkline_visible(self, visible: bool) -> None:
+        self.sparkline.setVisible(visible)
+
+    def set_thresholds(self, warn: float, crit: float) -> None:
+        self._warn = float(warn); self._crit = float(crit)
+        self._refresh_value_style(); self.update()
+
+    def set_value(self, percent: float, text: str, secondary: str = "",
+                  critical_override: bool = False) -> None:
+        try:
+            self._value_target = max(0.0, min(100.0, float(percent)))
+        except (TypeError, ValueError):
+            self._value_target = 0.0
+        self._value_text = text
+        self._secondary_text = secondary
+        self._critical = critical_override or (self._value_target >= self._crit)
+        self.lbl_value.setText(text)
+        self.lbl_secondary.setText(secondary)
+        self._refresh_value_style()
+        self.sparkline.push(self._value_target)
+        self._anim.stop()
+        self._anim.setStartValue(self._value_anim)
+        self._anim.setEndValue(self._value_target)
+        self._anim.start()
+
+    def _refresh_value_style(self) -> None:
+        color = _color_for_load(self._value_target, self._accent, self._warn, self._crit)
+        if self._critical:
+            color = QColor("#ff5c5c")
+        self.lbl_value.setStyleSheet(f"color: {color.name()};")
+
+    def paintEvent(self, _event):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        radius = 12.0
+        bg = QLinearGradient(0, 0, 0, h)
+        bg.setColorAt(0.0, QColor(30, 30, 40, 235))
+        bg.setColorAt(1.0, QColor(18, 18, 26, 235))
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(bg))
+        p.drawRoundedRect(QRectF(0, 0, w, h), radius, radius)
+
+        hi = QPen(QColor(255, 255, 255, 22)); hi.setWidthF(1.0)
+        p.setPen(hi); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
+
+        track_h = 4.0
+        spark_h = 22.0 if self.sparkline.isVisible() else 0.0
+        track_y = h - spark_h - 10
+        track_rect = QRectF(14, track_y, w - 28, track_h)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(255, 255, 255, 30))
+        p.drawRoundedRect(track_rect, track_h/2, track_h/2)
+
+        filled_w = (self._value_anim / 100.0) * (w - 28)
+        if filled_w > 1.0:
+            fg = _color_for_load(self._value_anim, self._accent, self._warn, self._crit)
+            if self._critical:
+                fg = QColor("#ff5c5c")
+            grad = QLinearGradient(14, 0, 14 + filled_w, 0)
+            c1 = QColor(fg); c1.setAlpha(230)
+            c2 = QColor(fg); c2.setAlpha(255)
+            grad.setColorAt(0.0, c1); grad.setColorAt(1.0, c2)
+            p.setBrush(QBrush(grad))
+            p.drawRoundedRect(QRectF(14, track_y, filled_w, track_h), track_h/2, track_h/2)
+            dot_r = 5.0
+            dot_grad = QRadialGradient(14 + filled_w, track_y + track_h/2, dot_r*2)
+            g_in = QColor(fg); g_in.setAlpha(200)
+            g_out = QColor(fg); g_out.setAlpha(0)
+            dot_grad.setColorAt(0.0, g_in); dot_grad.setColorAt(1.0, g_out)
+            p.setBrush(QBrush(dot_grad))
+            p.drawEllipse(QPointF(14 + filled_w, track_y + track_h/2), dot_r*2, dot_r*2)
+
+
+class CircularGauge(QWidget):
+    def __init__(self, accent: str = "#00ff99",
+                 warn: int = 75, crit: int = 85, parent=None):
+        super().__init__(parent)
+        self._accent = QColor(accent)
+        self._warn = warn; self._crit = crit
+        self._temp = 0; self._util = 0
+        self._anim_util = 0.0; self._available = False
+        self.setFixedSize(96, 96)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._anim = QPropertyAnimation(self, b"animatedUtil")
+        self._anim.setDuration(500)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def get_animated_util(self) -> float: return self._anim_util
+    def set_animated_util(self, v: float) -> None:
+        self._anim_util = max(0.0, min(100.0, float(v))); self.update()
+    animatedUtil = pyqtProperty(float, fget=get_animated_util, fset=set_animated_util)
+
+    def set_accent(self, color: str) -> None:
+        self._accent = QColor(color); self.update()
+
+    def set_thresholds(self, warn: int, crit: int) -> None:
+        self._warn = int(warn); self._crit = int(crit); self.update()
+
+    def set_values(self, temp, util) -> None:
+        if temp is None or util is None:
+            self._available = False; self.update(); return
+        self._available = True
+        self._temp = int(temp)
+        new_util = int(util)
+        self._anim.stop()
+        self._anim.setStartValue(self._anim_util)
+        self._anim.setEndValue(float(new_util))
+        self._anim.start()
+        self._util = new_util
+
+    def paintEvent(self, _event):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        cx, cy = w/2, h/2
+        radius = min(w, h)/2 - 6
+
+        track_pen = QPen(QColor(255,255,255,32)); track_pen.setWidth(6)
+        p.setPen(track_pen); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(cx, cy), radius, radius)
+
+        color = _color_for_temp(self._temp if self._available else 40, self._accent,
+                                 self._warn, self._crit)
+
+        glow = QRadialGradient(cx, cy, radius + 8)
+        g1 = QColor(color); g1.setAlpha(0)
+        g2 = QColor(color); g2.setAlpha(60)
+        g3 = QColor(color); g3.setAlpha(0)
+        glow.setColorAt(0.55, g1); glow.setColorAt(0.75, g2); glow.setColorAt(1.0, g3)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(glow))
+        p.drawEllipse(QPointF(cx, cy), radius + 8, radius + 8)
+
+        rect = QRectF(cx - radius, cy - radius, radius*2, radius*2)
+        arc_pen = QPen(color); arc_pen.setWidth(6)
+        arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(arc_pen); p.setBrush(Qt.BrushStyle.NoBrush)
+        start_angle = 90*16
+        span = -int((self._anim_util/100.0) * 360*16) if self._available else 0
+        p.drawArc(rect, start_angle, span)
+
+        p.setPen(QColor(255, 255, 255, 240))
+        fb = QFont("Segoe UI", 18); fb.setWeight(QFont.Weight.Black); p.setFont(fb)
+        txt = f"{self._temp}°" if self._available else "N/A"
+        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, txt)
+
+        p.setPen(QColor(255, 255, 255, 130))
+        fl = QFont("Segoe UI", 8); fl.setWeight(QFont.Weight.ExtraBold)
+        fl.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.0)
+        p.setFont(fl)
+        p.drawText(QRectF(rect.left(), rect.bottom() - 26, rect.width(), 14),
+                   Qt.AlignmentFlag.AlignCenter, "GPU")
+
+
+# ==========================================================
+#                   ВИДЖЕТЫ: WOW-ЭФФЕКТЫ
+# ==========================================================
+class ParticleField(QWidget):
+    """Лёгкий слой со светящимися частицами-искрами."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._accent = QColor("#00ff99")
+        self._enabled = True
+        self._particles: list[dict] = []
+        self._phase = 0.0
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(55)
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = bool(enabled)
+        if self._enabled:
+            if not self._timer.isActive():
+                self._timer.start(55)
+        else:
+            self._timer.stop()
+        self.update()
+
+    def set_accent(self, color: str) -> None:
+        self._accent = QColor(color); self.update()
+
+    def _ensure_particles(self) -> None:
+        target = 18 if self.width() > 200 else 10
+        while len(self._particles) < target:
+            self._particles.append(self._spawn())
+        self._particles = self._particles[:target]
+
+    def _spawn(self) -> dict:
+        return {
+            "x": random.uniform(0, max(1, self.width())),
+            "y": random.uniform(0, max(1, self.height())),
+            "vx": random.uniform(-0.18, 0.18),
+            "vy": random.uniform(-0.24, -0.05),
+            "r": random.uniform(1.2, 2.4),
+            "phase": random.uniform(0, 2*math.pi),
+        }
+
+    def _tick(self) -> None:
+        if not self._enabled:
+            return
+        self._phase += 0.04
+        for p in self._particles:
+            p["x"] += p["vx"]
+            p["y"] += p["vy"]
+            p["phase"] += 0.07
+            if p["y"] < -4 or p["x"] < -4 or p["x"] > self.width() + 4:
+                p.update(self._spawn())
+                p["y"] = self.height() + random.uniform(0, 12)
+        self.update()
+
+    def resizeEvent(self, event):
+        self._ensure_particles()
+        super().resizeEvent(event)
+
+    def paintEvent(self, _event):
+        if not self._enabled or not self._particles:
+            return
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for particle in self._particles:
+            a = 120 + int(80 * math.sin(particle["phase"]))
+            a = max(30, min(220, a))
+            r = particle["r"]
+            grad = QRadialGradient(particle["x"], particle["y"], r * 4)
+            c1 = QColor(self._accent); c1.setAlpha(a)
+            c2 = QColor(self._accent); c2.setAlpha(0)
+            grad.setColorAt(0.0, c1); grad.setColorAt(1.0, c2)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(grad))
+            p.drawEllipse(QPointF(particle["x"], particle["y"]), r*4, r*4)
+            p.setBrush(QColor(255, 255, 255, min(255, a + 50)))
+            p.drawEllipse(QPointF(particle["x"], particle["y"]), r*0.7, r*0.7)
+
+
+class MusicVisualizer(QWidget):
+    """14-bar псевдо-спектр (косметический, на синусоидах)."""
+
+    def __init__(self, accent: str = "#00ff99", parent=None):
+        super().__init__(parent)
+        self._accent = QColor(accent)
+        self._bars = 14
+        self._values = [0.0] * self._bars
+        self._target = [0.0] * self._bars
+        self._phase = 0.0
+        self._active = True
+        self.setMinimumHeight(26); self.setMaximumHeight(26)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(60)
+
+    def set_accent(self, color: str) -> None:
+        self._accent = QColor(color); self.update()
+
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+
+    def _tick(self) -> None:
+        self._phase += 0.18
+        for i in range(self._bars):
+            if self._active:
+                base = 0.35 + 0.35 * math.sin(self._phase + i*0.7)
+                highs = 0.25 * math.sin(self._phase*1.7 + i*1.3)
+                noise = random.uniform(-0.08, 0.08)
+                self._target[i] = max(0.02, min(1.0, base + highs + noise))
+            else:
+                self._target[i] = 0.02
+            # smooth
+            self._values[i] += (self._target[i] - self._values[i]) * 0.35
+        self.update()
+
+    def paintEvent(self, _event):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        gap = 3.0
+        bw = max(2.0, (w - gap*(self._bars - 1)) / self._bars)
+        for i, v in enumerate(self._values):
+            bh = max(2.0, v * h)
+            x = i * (bw + gap)
+            y = h - bh
+            grad = QLinearGradient(0, y, 0, h)
+            c1 = QColor(self._accent); c1.setAlpha(230)
+            c2 = QColor(self._accent); c2.setAlpha(90)
+            grad.setColorAt(0.0, c1); grad.setColorAt(1.0, c2)
+            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(grad))
+            p.drawRoundedRect(QRectF(x, y, bw, bh), bw/2, bw/2)
+
+
+# ==========================================================
+#                   SETTINGS-СПЕЦ. ВИДЖЕТЫ
+# ==========================================================
+class KeybindRecorder(QLineEdit):
+    """QLineEdit, который ловит реальные нажатия клавиш."""
+
+    hotkey_changed = pyqtSignal(str)
+
+    def __init__(self, initial: str, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._value = initial
+        self._recording = False
+        self._update_display()
+        self.setMinimumHeight(34)
+
+    def _update_display(self) -> None:
+        if self._recording:
+            self.setText("…нажмите сочетание…")
+        else:
+            self.setText(self._value.upper() if self._value else "—")
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._recording = True
+        self._update_display()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self._recording = False
+        self._update_display()
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        self._recording = True
+        self._update_display()
+
+    def keyPressEvent(self, event):
+        if not self._recording:
+            super().keyPressEvent(event); return
+        key = event.key()
+        if key in (Qt.Key.Key_Escape, Qt.Key.Key_Tab):
+            self._recording = False; self._update_display(); self.clearFocus(); return
+        if key in (Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+            return  # ждём не-модификатор
+
+        mods = event.modifiers()
+        parts = []
+        if mods & Qt.KeyboardModifier.ControlModifier: parts.append("ctrl")
+        if mods & Qt.KeyboardModifier.AltModifier: parts.append("alt")
+        if mods & Qt.KeyboardModifier.ShiftModifier: parts.append("shift")
+        if mods & Qt.KeyboardModifier.MetaModifier: parts.append("win")
+
+        key_name = QKeySequence(key).toString().lower()
+        if not key_name:
+            return
+        parts.append(key_name)
+
+        self._value = "+".join(parts)
+        self._recording = False
+        self._update_display()
+        self.hotkey_changed.emit(self._value)
+        self.clearFocus()
+
+
+class ThresholdEditor(QWidget):
+    """Пара слайдеров warn/crit с живыми value-label'ами."""
+
+    changed = pyqtSignal(int, int)
+
+    def __init__(self, title: str, warn: int, crit: int,
+                 vmin: int = 30, vmax: int = 100, unit: str = "%", parent=None):
+        super().__init__(parent)
+        self._unit = unit
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(4)
+
+        title_lbl = QLabel(title); title_lbl.setObjectName("threshold_section")
+        title_lbl.setStyleSheet(
+            "QLabel { color: #ffffff; font-family: 'Segoe UI'; font-size: 12px; "
+            "font-weight: 900; letter-spacing: 0.8px; background: transparent; }"
+        )
+        root.addWidget(title_lbl)
+
+        row_warn = self._row("⚠  Warn", warn, vmin, vmax, "#ffcc66")
+        self.slider_warn = row_warn[0]; self.lbl_warn = row_warn[1]
+        root.addLayout(row_warn[2])
+
+        row_crit = self._row("🔥  Critical", crit, vmin, vmax, "#ff5c5c")
+        self.slider_crit = row_crit[0]; self.lbl_crit = row_crit[1]
+        root.addLayout(row_crit[2])
+
+        self.slider_warn.valueChanged.connect(self._emit)
+        self.slider_crit.valueChanged.connect(self._emit)
+
+    def _row(self, label: str, value: int, vmin: int, vmax: int, color: str):
+        row = QHBoxLayout(); row.setSpacing(8)
+        lbl = QLabel(label); lbl.setFixedWidth(90)
+        lbl.setStyleSheet(f"color: {color}; font-family: 'Segoe UI'; font-size: 11px; font-weight: 900; background: transparent;")
+        s = QSlider(Qt.Orientation.Horizontal); s.setRange(vmin, vmax); s.setValue(int(value))
+        val = QLabel(f"{value}{self._unit}"); val.setFixedWidth(52)
+        val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        val.setStyleSheet("color: #ffffff; font-family: 'Segoe UI'; font-weight: 900; font-size: 12px; background: transparent;")
+        s.valueChanged.connect(lambda v, lb=val: lb.setText(f"{v}{self._unit}"))
+        row.addWidget(lbl); row.addWidget(s, 1); row.addWidget(val)
+        return s, val, row
+
+    def _emit(self, _val=None) -> None:
+        w = self.slider_warn.value(); c = self.slider_crit.value()
+        if w > c:
+            c = w; self.slider_crit.blockSignals(True)
+            self.slider_crit.setValue(c); self.slider_crit.blockSignals(False)
+            self.lbl_crit.setText(f"{c}{self._unit}")
+        self.changed.emit(w, c)
+
+
+class PresetCard(QPushButton):
+    """Карточка темы-пресета с свотчем цвета."""
+
+    def __init__(self, name: str, preset: dict, parent=None):
+        super().__init__(parent)
+        self._name = name; self._preset = preset
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCheckable(True)
+        self.setMinimumHeight(76); self.setMinimumWidth(150)
+        self._refresh_style()
+
+    def _refresh_style(self) -> None:
+        accent = self._preset.get("accent_color", "#00ff99")
+        self.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: #14141c;
+                color: #ffffff;
+                border: 1px solid rgba(255,255,255,18);
+                border-radius: 12px;
+                text-align: left;
+                padding: 10px 12px 10px 44px;
+                font-family: 'Segoe UI'; font-weight: 900; font-size: 12px;
+                letter-spacing: 0.6px;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {accent};
+                background: rgba(20,20,28,200);
+            }}
+            QPushButton:checked {{
+                border: 2px solid {accent};
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                    stop:0 rgba(20,20,28,240), stop:1 rgba(20,20,28,200));
+            }}
+            """
+        )
+        self.setText(f"  {self._name}")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # swatch circle (top-left)
+        accent = QColor(self._preset.get("accent_color", "#00ff99"))
+        glow = QRadialGradient(22, self.height()/2, 22)
+        g1 = QColor(accent); g1.setAlpha(180)
+        g2 = QColor(accent); g2.setAlpha(0)
+        glow.setColorAt(0.0, g1); glow.setColorAt(1.0, g2)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(glow))
+        p.drawEllipse(QPointF(22, self.height()/2), 20, 20)
+        p.setBrush(accent)
+        p.drawEllipse(QPointF(22, self.height()/2), 9, 9)
+        # subtitle
+        p.setPen(QColor(255,255,255,130))
+        sub_font = QFont("Segoe UI", 8); sub_font.setWeight(QFont.Weight.DemiBold)
+        p.setFont(sub_font)
+        p.drawText(QRectF(44, self.height()/2 + 4, self.width()-48, 18),
+                   Qt.AlignmentFlag.AlignLeft,
+                   f"opacity {self._preset.get('opacity', 235)}  ·  {accent.name()}")
+
+
+# ==========================================================
+#                 ЖИВОЙ ПРЕВЬЮ-ОВЕРЛЕЙ
+# ==========================================================
+class LivePreview(QFrame):
+    """Мини-копия оверлея внутри окна настроек, реактивная к config."""
+
+    def __init__(self, config: dict, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.setObjectName("live_preview")
+        self.setMinimumWidth(260); self.setMinimumHeight(300)
+        self.setFrameStyle(QFrame.Shape.NoFrame)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 12)
+        root.setSpacing(8)
+
+        header = QHBoxLayout(); header.setSpacing(6)
+        self.dot = StatusDot()
+        self.lbl_title = QLabel("PHANTOM · LIVE")
+        tf = QFont("Segoe UI", 10); tf.setWeight(QFont.Weight.Black)
+        tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.5)
+        self.lbl_title.setFont(tf)
+        self.lbl_title.setStyleSheet("color: #ffffff;")
+        header.addWidget(self.dot); header.addWidget(self.lbl_title); header.addStretch(1)
+        root.addLayout(header)
+
+        body = QHBoxLayout(); body.setSpacing(10)
+        self.gauge = CircularGauge(accent=config["accent_color"],
+                                   warn=config.get("gpu_warn", 75),
+                                   crit=config.get("gpu_crit", 85))
+        self.gauge.setFixedSize(74, 74)
+        body.addWidget(self.gauge, 0, Qt.AlignmentFlag.AlignTop)
+
+        cards = QVBoxLayout(); cards.setSpacing(6)
+        self.card_cpu = MetricCard("🧠", "CPU", accent=config["accent_color"],
+                                   show_sparkline=config.get("show_sparklines", True),
+                                   warn=config.get("cpu_warn", 80), crit=config.get("cpu_crit", 95))
+        self.card_ram = MetricCard("💾", "RAM", accent=config["accent_color"],
+                                   show_sparkline=config.get("show_sparklines", True),
+                                   warn=config.get("ram_warn", 80), crit=config.get("ram_crit", 92))
+        self.card_cpu.setMinimumHeight(56); self.card_ram.setMinimumHeight(56)
+        cards.addWidget(self.card_cpu); cards.addWidget(self.card_ram)
+        body.addLayout(cards, 1)
+        root.addLayout(body)
+
+        self.visualizer = MusicVisualizer(accent=config["accent_color"])
+        self.visualizer.setFixedHeight(22)
+        root.addWidget(self.visualizer)
+
+        # fill data
+        self._seed_timer = QTimer(self)
+        self._seed_timer.timeout.connect(self._seed_data)
+        self._seed_timer.start(420)
+        self._seed_data()
+        self.apply_config(config)
+
+    def _seed_data(self) -> None:
+        cpu = 35 + random.random()*35
+        ram = 48 + random.random()*20
+        gpu_t = 58 + int(random.random()*18)
+        gpu_u = 35 + int(random.random()*55)
+        self.card_cpu.set_value(cpu, f"{cpu:.0f}%", "2.45 GHz")
+        self.card_ram.set_value(ram, f"{ram:.0f}%", "8.1 / 16 GB")
+        self.gauge.set_values(gpu_t, gpu_u)
+        if gpu_t > self.config.get("gpu_crit", 85):
+            self.dot.set_color("#ff5c5c")
+        elif gpu_t > self.config.get("gpu_warn", 75):
+            self.dot.set_color("#ffcc66")
+        else:
+            self.dot.set_color(self.config["accent_color"])
+
+    def apply_config(self, cfg: dict) -> None:
+        self.config = cfg
+        accent = cfg["accent_color"]
+        self.card_cpu.set_accent(accent); self.card_ram.set_accent(accent)
+        self.card_cpu.set_thresholds(cfg.get("cpu_warn", 80), cfg.get("cpu_crit", 95))
+        self.card_ram.set_thresholds(cfg.get("ram_warn", 80), cfg.get("ram_crit", 92))
+        self.card_cpu.set_sparkline_visible(cfg.get("show_sparklines", True))
+        self.card_ram.set_sparkline_visible(cfg.get("show_sparklines", True))
+        self.gauge.set_accent(accent)
+        self.gauge.set_thresholds(cfg.get("gpu_warn", 75), cfg.get("gpu_crit", 85))
+        self.visualizer.set_accent(accent)
+        self.visualizer.setVisible(cfg.get("show_visualizer", True))
+        self.card_cpu.setVisible(cfg.get("show_cpu", True))
+        self.card_ram.setVisible(cfg.get("show_ram", True))
+        self.gauge.setVisible(cfg.get("show_gpu", True))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        radius = 14.0
+        path = QPainterPath(); path.addRoundedRect(QRectF(0, 0, w, h), radius, radius)
+        p.setClipPath(path)
+
+        bg = QLinearGradient(0, 0, 0, h)
+        bg.setColorAt(0.0, QColor(22, 22, 32, 255))
+        bg.setColorAt(1.0, QColor(9, 9, 14, 255))
+        p.fillRect(self.rect(), QBrush(bg))
+
+        accent = QColor(self.config["accent_color"])
+        accent_glow = QRadialGradient(0, 0, max(w, h))
+        c1 = QColor(accent); c1.setAlpha(90)
+        c2 = QColor(accent); c2.setAlpha(0)
+        accent_glow.setColorAt(0.0, c1); accent_glow.setColorAt(0.9, c2)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(accent_glow))
+        p.drawRect(self.rect())
+
+        cool = QColor("#5a7dff")
+        cool_glow = QRadialGradient(float(w), float(h), max(w, h)*0.9)
+        cc1 = QColor(cool); cc1.setAlpha(60)
+        cc2 = QColor(cool); cc2.setAlpha(0)
+        cool_glow.setColorAt(0.0, cc1); cool_glow.setColorAt(1.0, cc2)
+        p.setBrush(QBrush(cool_glow))
+        p.drawRect(self.rect())
+
+        # animated border (simplified for preview)
+        pen = QPen(QColor(accent.red(), accent.green(), accent.blue(), 110), 1.5)
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, w-1, h-1), radius, radius)
+
+
+# ==========================================================
+#                     ГЛАВНЫЕ ПАНЕЛИ
+# ==========================================================
+class GlassPanel(QWidget):
+    """Премиум-фон: градиент + glow + шум + опциональный вращающийся conic-бордер."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._accent = QColor("#00ff99")
+        self._bg_pixmap: QPixmap | None = None
+        self._noise: QPixmap | None = None
+        self._unlocked = False
+        self._border_angle = 0.0
+        self._animated_border = True
+        self._critical = False
+
+        self._border_timer = QTimer(self)
+        self._border_timer.timeout.connect(self._spin_border)
+        self._border_timer.start(90)
+
+    def set_accent(self, color: str) -> None:
+        self._accent = QColor(color); self.update()
+
+    def set_background_image(self, path: str) -> None:
+        if path and os.path.exists(path):
+            self._bg_pixmap = QPixmap(path)
+        else:
+            self._bg_pixmap = None
+        self.update()
+
+    def set_unlocked(self, unlocked: bool) -> None:
+        self._unlocked = bool(unlocked); self.update()
+
+    def set_animated_border(self, enabled: bool) -> None:
+        self._animated_border = bool(enabled)
+        if enabled:
+            if not self._border_timer.isActive():
+                self._border_timer.start(90)
+        else:
+            self._border_timer.stop()
+        self.update()
+
+    def set_critical(self, critical: bool) -> None:
+        self._critical = bool(critical); self.update()
+
+    def _spin_border(self) -> None:
+        self._border_angle = (self._border_angle + 2.2) % 360
+        if self._animated_border:
+            self.update()
+
+    def _make_noise(self, w: int, h: int) -> QPixmap:
+        if self._noise is not None and self._noise.width() == w and self._noise.height() == h:
+            return self._noise
+        img = QImage(w, h, QImage.Format.Format_ARGB32)
+        img.fill(Qt.GlobalColor.transparent)
+        rnd = random.Random(42)
+        for _ in range(w * h // 28):
+            x = rnd.randint(0, w - 1); y = rnd.randint(0, h - 1)
+            a = rnd.randint(6, 18)
+            img.setPixelColor(x, y, QColor(255, 255, 255, a))
+        self._noise = QPixmap.fromImage(img)
+        return self._noise
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        w, h = self.width(), self.height()
+        radius = 20.0
+        path = QPainterPath(); path.addRoundedRect(QRectF(0, 0, w, h), radius, radius)
+        p.setClipPath(path)
+
+        bg = QLinearGradient(0, 0, 0, h)
+        bg.setColorAt(0.0, QColor(22, 22, 32, 245))
+        bg.setColorAt(1.0, QColor(9, 9, 14, 245))
+        p.fillRect(self.rect(), QBrush(bg))
+
+        if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
+            scaled = self._bg_pixmap.scaled(
+                w, h,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            p.setOpacity(0.35); p.drawPixmap(0, 0, scaled); p.setOpacity(1.0)
+
+        accent_glow = QRadialGradient(0, 0, max(w, h))
+        c1 = QColor(self._accent); c1.setAlpha(80)
+        c2 = QColor(self._accent); c2.setAlpha(0)
+        accent_glow.setColorAt(0.0, c1); accent_glow.setColorAt(0.9, c2)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(accent_glow))
+        p.drawRect(self.rect())
+
+        cool = QColor("#5a7dff")
+        cool_glow = QRadialGradient(float(w), float(h), max(w, h)*0.9)
+        cc1 = QColor(cool); cc1.setAlpha(60)
+        cc2 = QColor(cool); cc2.setAlpha(0)
+        cool_glow.setColorAt(0.0, cc1); cool_glow.setColorAt(1.0, cc2)
+        p.setBrush(QBrush(cool_glow))
+        p.drawRect(self.rect())
+
+        if self._critical:
+            red = QColor("#ff5c5c")
+            r_glow = QRadialGradient(w/2, h/2, max(w, h))
+            r1 = QColor(red); r1.setAlpha(70)
+            r2 = QColor(red); r2.setAlpha(0)
+            r_glow.setColorAt(0.0, r1); r_glow.setColorAt(1.0, r2)
+            p.setBrush(QBrush(r_glow)); p.drawRect(self.rect())
+
+        p.drawPixmap(0, 0, self._make_noise(w, h))
+
+        p.setPen(QPen(QColor(255, 255, 255, 24), 1))
+        p.drawLine(int(radius/2), 1, int(w - radius/2), 1)
+
+        # ---- Border ----
+        if self._animated_border:
+            cg = QConicalGradient(w/2, h/2, self._border_angle)
+            a = QColor(self._accent)
+            transparent = QColor(self._accent); transparent.setAlpha(0)
+            cg.setColorAt(0.00, transparent)
+            cg.setColorAt(0.20, a)
+            cg.setColorAt(0.40, transparent)
+            cg.setColorAt(0.60, a)
+            cg.setColorAt(0.80, transparent)
+            cg.setColorAt(1.00, transparent)
+            border_pen = QPen(QBrush(cg), 2.0 if not self._unlocked else 2.4)
+            if self._unlocked:
+                border_pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(border_pen); p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(1, 1, w-2, h-2), radius-1, radius-1)
+        else:
+            border = QColor(self._accent) if self._unlocked else QColor(255, 255, 255, 36)
+            pen = QPen(border); pen.setWidth(2 if self._unlocked else 1)
+            if self._unlocked: pen.setStyle(Qt.PenStyle.DashLine)
+            p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(0.5, 0.5, w-1, h-1), radius, radius)
+
+
+# ==========================================================
+#                   ДИАЛОГ НАСТРОЕК
 # ==========================================================
 class ModernSettings(QDialog):
-    def __init__(self, current_config, parent=None):
+    def __init__(self, current_config: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Phantom Control Center")
-        self.setMinimumSize(720, 520)
+        self.setMinimumSize(1060, 620)
         self.config = current_config
         self.parent_overlay = parent
-
         if os.path.exists("icon.png"):
             self.setWindowIcon(QIcon("icon.png"))
-
         self._build_ui()
         self._apply_styles()
 
-    # ---------- UI ----------
+    # ----- structure -----
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(0, 0, 0, 0); root.setSpacing(0)
 
         # sidebar
-        side = QWidget()
-        side.setObjectName("side")
-        side.setFixedWidth(200)
+        side = QWidget(); side.setObjectName("side"); side.setFixedWidth(210)
         side_l = QVBoxLayout(side)
-        side_l.setContentsMargins(18, 22, 14, 22)
-        side_l.setSpacing(12)
+        side_l.setContentsMargins(18, 22, 14, 22); side_l.setSpacing(12)
 
-        brand = QLabel("⚙  PHANTOM")
-        brand.setStyleSheet(
-            f"color: {self.config['accent_color']}; font-family: 'Segoe UI'; "
-            "font-size: 14px; font-weight: 900; letter-spacing: 2.5px;"
-        )
-        subtitle = QLabel(f"v{APP_VERSION}")
-        subtitle.setStyleSheet("color: #8891b0; font-size: 10px; letter-spacing: 0.8px;")
+        brand = QLabel("⚙  PHANTOM"); brand.setObjectName("brand")
+        subtitle = QLabel(f"v{APP_VERSION}"); subtitle.setObjectName("brand_version")
+        side_l.addWidget(brand); side_l.addWidget(subtitle); side_l.addSpacing(10)
 
-        side_l.addWidget(brand)
-        side_l.addWidget(subtitle)
-        side_l.addSpacing(10)
-
-        self.nav = QListWidget()
-        self.nav.setObjectName("nav")
+        self.nav = QListWidget(); self.nav.setObjectName("nav")
         self.nav.setFrameShape(QFrame.Shape.NoFrame)
-        for title in ["⚙   Общие", "🎨   Дизайн", "🎮   Игры", "ℹ   О программе"]:
-            QListWidgetItem(title, self.nav)
+        for t in ["⚙   Общие", "🎨   Дизайн", "🧩   Модули",
+                  "📊   Пороги", "🎭   Пресеты", "🎮   Игры", "ℹ   О программе"]:
+            QListWidgetItem(t, self.nav)
         self.nav.setCurrentRow(0)
         side_l.addWidget(self.nav, 1)
 
         btn_close = QPushButton("✔  Готово")
-        btn_close.setMinimumHeight(38)
-        btn_close.setObjectName("done_btn")
+        btn_close.setMinimumHeight(38); btn_close.setObjectName("done_btn")
         btn_close.clicked.connect(self.accept)
         side_l.addWidget(btn_close)
 
-        # content
-        self.stack = QStackedWidget()
-        self.stack.setObjectName("stack")
+        # content stack
+        self.stack = QStackedWidget(); self.stack.setObjectName("stack")
         self._build_page_general()
         self._build_page_design()
+        self._build_page_modules()
+        self._build_page_thresholds()
+        self._build_page_presets()
         self._build_page_games()
         self._build_page_about()
-
         self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+
+        # live preview (always on the right)
+        preview_holder = QWidget(); preview_holder.setFixedWidth(300)
+        preview_holder.setObjectName("preview_holder")
+        ph_l = QVBoxLayout(preview_holder)
+        ph_l.setContentsMargins(16, 22, 22, 22); ph_l.setSpacing(10)
+        ph_title = QLabel("LIVE PREVIEW"); ph_title.setObjectName("live_title")
+        ph_l.addWidget(ph_title)
+        self.preview = LivePreview(self.config)
+        ph_l.addWidget(self.preview, 1)
+        ph_tip = QLabel("Изменения применяются мгновенно.\nПресеты — во вкладке «Пресеты»."); ph_tip.setObjectName("live_hint")
+        ph_tip.setWordWrap(True)
+        ph_l.addWidget(ph_tip)
 
         root.addWidget(side)
         root.addWidget(self.stack, 1)
+        root.addWidget(preview_holder)
 
-    def _page_scaffold(self, title: str) -> tuple[QWidget, QVBoxLayout]:
+    # ----- page scaffolding -----
+    def _page_scaffold(self, title: str, subtitle: str = "") -> tuple[QWidget, QVBoxLayout]:
         page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(32, 28, 32, 28)
-        lay.setSpacing(14)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        lbl = QLabel(title)
-        lbl.setStyleSheet(
-            "color: #ffffff; font-family: 'Segoe UI'; font-size: 20px; "
-            "font-weight: 900; letter-spacing: 0.6px;"
-        )
-        lay.addWidget(lbl)
+        inner = QWidget(); scroll.setWidget(inner)
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(32, 26, 32, 28); lay.setSpacing(14)
 
-        sep = QFrame()
-        sep.setFixedHeight(1)
+        t = QLabel(title); t.setObjectName("page_title")
+        lay.addWidget(t)
+        if subtitle:
+            s = QLabel(subtitle); s.setWordWrap(True); s.setObjectName("page_subtitle")
+            lay.addWidget(s)
+
+        sep = QFrame(); sep.setFixedHeight(1)
         sep.setStyleSheet("background: rgba(255,255,255,20); border: none;")
-        lay.addWidget(sep)
-        lay.addSpacing(4)
+        lay.addWidget(sep); lay.addSpacing(4)
+
+        page_root = QVBoxLayout(page); page_root.setContentsMargins(0, 0, 0, 0); page_root.setSpacing(0)
+        page_root.addWidget(scroll)
         return page, lay
 
+    # ---------- Page: General ----------
     def _build_page_general(self) -> None:
-        page, lay = self._page_scaffold("Общие настройки")
+        page, lay = self._page_scaffold(
+            "Общие настройки",
+            "Хоткеи, интервал обновления, системное поведение и перенос конфигурации."
+        )
+        form = QFormLayout(); form.setSpacing(14)
 
-        form = QFormLayout()
-        form.setSpacing(16)
-        form.setContentsMargins(0, 0, 0, 0)
+        self.rec_toggle = KeybindRecorder(self.config.get("hotkey_toggle", "ctrl+shift+p"))
+        self.rec_toggle.hotkey_changed.connect(lambda h: self._commit("hotkey_toggle", h, rehook=True))
+        form.addRow("Хоткей: показать/скрыть:", self.rec_toggle)
 
-        self.input_hotkey = QLineEdit(self.config.get("hotkey_toggle", "ctrl+shift+p"))
-        self.input_hotkey.editingFinished.connect(self._commit_hotkey)
-        form.addRow("Хоткей (скрыть/показать):", self.input_hotkey)
+        self.rec_settings = KeybindRecorder(self.config.get("hotkey_settings", "ctrl+shift+o"))
+        self.rec_settings.hotkey_changed.connect(lambda h: self._commit("hotkey_settings", h, rehook=True))
+        form.addRow("Хоткей: открыть настройки:", self.rec_settings)
 
         self.spin_interval = QSpinBox()
-        self.spin_interval.setRange(250, 5000)
-        self.spin_interval.setSingleStep(100)
+        self.spin_interval.setRange(250, 5000); self.spin_interval.setSingleStep(100)
         self.spin_interval.setSuffix("  мс")
         self.spin_interval.setValue(int(self.config.get("update_interval_ms", 1000)))
-        self.spin_interval.valueChanged.connect(self._commit_interval)
+        self.spin_interval.valueChanged.connect(lambda v: self._commit("update_interval_ms", int(v), apply_interval=True))
         form.addRow("Интервал обновления:", self.spin_interval)
+
+        self.combo_corner = QComboBox()
+        for code, label in [
+            ("none", "— не прилипать"),
+            ("tl", "↖ Верхний левый"),
+            ("tr", "↗ Верхний правый"),
+            ("bl", "↙ Нижний левый"),
+            ("br", "↘ Нижний правый"),
+        ]:
+            self.combo_corner.addItem(label, code)
+        idx = self.combo_corner.findData(self.config.get("corner_snap", "none"))
+        if idx >= 0: self.combo_corner.setCurrentIndex(idx)
+        self.combo_corner.currentIndexChanged.connect(
+            lambda _i: self._commit("corner_snap", self.combo_corner.currentData(), apply_geometry=True)
+        )
+        form.addRow("Прилипание к углу:", self.combo_corner)
+
+        self.spin_margin = QSpinBox()
+        self.spin_margin.setRange(0, 200); self.spin_margin.setSuffix("  px")
+        self.spin_margin.setValue(int(self.config.get("corner_margin", 24)))
+        self.spin_margin.valueChanged.connect(lambda v: self._commit("corner_margin", int(v), apply_geometry=True))
+        form.addRow("Отступ от края:", self.spin_margin)
 
         self.cb_smart = QCheckBox("Показывать только в играх (Smart Focus)")
         self.cb_smart.setChecked(bool(self.config.get("smart_hide", False)))
-        self.cb_smart.stateChanged.connect(lambda s: self._commit_bool("smart_hide", s))
+        self.cb_smart.stateChanged.connect(lambda s: self._commit("smart_hide", bool(s)))
         form.addRow("Поведение:", self.cb_smart)
 
-        self.cb_ai = QCheckBox("Текстовый AI ассистент")
-        self.cb_ai.setChecked(bool(self.config.get("show_ai", True)))
-        self.cb_ai.stateChanged.connect(lambda s: self._commit_bool("show_ai", s))
-        form.addRow("Интерфейс:", self.cb_ai)
-
-        self.cb_voice = QCheckBox("Голосовое предупреждение о перегреве")
+        self.cb_voice = QCheckBox("Голос при перегреве GPU")
         self.cb_voice.setChecked(bool(self.config.get("enable_voice", True)))
-        self.cb_voice.stateChanged.connect(lambda s: self._commit_bool("enable_voice", s))
+        self.cb_voice.stateChanged.connect(lambda s: self._commit("enable_voice", bool(s)))
         form.addRow("Звук:", self.cb_voice)
 
-        self.cb_taskbar = QCheckBox("Показывать значок на панели задач")
+        self.cb_taskbar = QCheckBox("Значок на панели задач")
         self.cb_taskbar.setChecked(bool(self.config.get("show_in_taskbar", False)))
-        self.cb_taskbar.stateChanged.connect(self._commit_taskbar)
+        self.cb_taskbar.stateChanged.connect(lambda s: self._commit("show_in_taskbar", bool(s), rewindow=True))
         form.addRow("Система:", self.cb_taskbar)
 
-        lay.addLayout(form)
+        lay.addLayout(form); lay.addSpacing(12)
+
+        # import / export / reset
+        sep = QFrame(); sep.setFixedHeight(1); sep.setStyleSheet("background: rgba(255,255,255,14);")
+        lay.addWidget(sep)
+        io_label = QLabel("Конфигурация")
+        io_label.setStyleSheet("color: #e6e9f2; font-weight: 800; letter-spacing: 0.6px; margin-top: 4px;")
+        lay.addWidget(io_label)
+
+        io_row = QHBoxLayout(); io_row.setSpacing(8)
+        btn_export = QPushButton("⬇  Экспорт")
+        btn_export.clicked.connect(self._export_config)
+        btn_import = QPushButton("⬆  Импорт")
+        btn_import.clicked.connect(self._import_config)
+        btn_reset = QPushButton("↻  Сбросить к дефолту")
+        btn_reset.setObjectName("reset_btn")
+        btn_reset.clicked.connect(self._reset_config)
+        io_row.addWidget(btn_export); io_row.addWidget(btn_import); io_row.addWidget(btn_reset); io_row.addStretch(1)
+        lay.addLayout(io_row)
+
         lay.addStretch(1)
         self.stack.addWidget(page)
 
+    # ---------- Page: Design ----------
     def _build_page_design(self) -> None:
-        page, lay = self._page_scaffold("Дизайн и внешний вид")
-
-        form = QFormLayout()
-        form.setSpacing(16)
-        form.setContentsMargins(0, 0, 0, 0)
+        page, lay = self._page_scaffold(
+            "Дизайн и внешний вид",
+            "Акцентный цвет, масштаб шрифта, эффекты и фон."
+        )
+        form = QFormLayout(); form.setSpacing(16)
 
         self.slider_opacity = QSlider(Qt.Orientation.Horizontal)
         self.slider_opacity.setRange(60, 255)
-        self.slider_opacity.setValue(int(self.config.get("opacity", 200)))
-        self.slider_opacity.valueChanged.connect(self._commit_opacity_live)
+        self.slider_opacity.setValue(int(self.config.get("opacity", 235)))
+        self.slider_opacity.valueChanged.connect(lambda v: self._commit("opacity", int(v), save=False, apply_live=True))
         self.slider_opacity.sliderReleased.connect(lambda: save_config(self.config))
-        form.addRow("Прозрачность панели:", self.slider_opacity)
+        form.addRow("Прозрачность:", self.slider_opacity)
 
-        self.accent_swatch = QPushButton()
-        self.accent_swatch.setFixedHeight(32)
+        self.accent_swatch = QPushButton(); self.accent_swatch.setFixedHeight(32)
         self._refresh_accent_swatch()
         self.accent_swatch.clicked.connect(self._pick_accent)
         form.addRow("Акцентный цвет:", self.accent_swatch)
 
-        # preset accent row
-        preset_row = QHBoxLayout()
-        preset_row.setSpacing(8)
+        # quick preset pills
+        preset_row = QHBoxLayout(); preset_row.setSpacing(8)
         for name, hex_ in [
-            ("Neon Mint", "#00ff99"),
-            ("Ultraviolet", "#a78bfa"),
-            ("Cyber Cyan", "#22d3ee"),
-            ("Magma", "#ff7a59"),
-            ("Sakura", "#ff6ba8"),
-            ("Gold", "#f5c24c"),
+            ("Neon Mint", "#00ff99"), ("Ultraviolet", "#a78bfa"),
+            ("Cyber Cyan", "#22d3ee"), ("Magma", "#ff7a59"),
+            ("Sakura", "#ff6ba8"), ("Gold", "#f5c24c"),
         ]:
-            btn = QPushButton()
-            btn.setFixedSize(36, 22)
-            btn.setToolTip(name)
+            btn = QPushButton(); btn.setFixedSize(34, 22); btn.setToolTip(name)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(
                 f"QPushButton {{ background: {hex_}; border: 1px solid rgba(255,255,255,50); border-radius: 4px; }}"
                 f"QPushButton:hover {{ border: 1px solid rgba(255,255,255,120); }}"
             )
-            btn.clicked.connect(lambda _chk=False, c=hex_: self._set_accent(c))
+            btn.clicked.connect(lambda _c=False, h=hex_: self._set_accent(h))
             preset_row.addWidget(btn)
         preset_row.addStretch(1)
-        form.addRow("Пресеты:", preset_row)
+        form.addRow("Быстрый цвет:", preset_row)
 
-        self.cb_spark = QCheckBox("Показывать мини-графики (sparklines)")
-        self.cb_spark.setChecked(bool(self.config.get("show_sparklines", True)))
-        self.cb_spark.stateChanged.connect(lambda s: self._commit_bool("show_sparklines", s))
-        form.addRow("Графики:", self.cb_spark)
+        self.spin_font = QDoubleSpinBox()
+        self.spin_font.setRange(0.8, 1.4); self.spin_font.setSingleStep(0.05)
+        self.spin_font.setValue(float(self.config.get("font_scale", 1.0)))
+        self.spin_font.setSuffix("×")
+        self.spin_font.valueChanged.connect(lambda v: self._commit("font_scale", float(v)))
+        form.addRow("Масштаб шрифта:", self.spin_font)
 
-        self.cb_net = QCheckBox("Показывать скорость сети (↑ / ↓)")
-        self.cb_net.setChecked(bool(self.config.get("show_network_rate", True)))
-        self.cb_net.stateChanged.connect(lambda s: self._commit_bool("show_network_rate", s))
-        form.addRow("Сеть:", self.cb_net)
+        self.cb_border = QCheckBox("Вращающийся conic-бордер (WOW)")
+        self.cb_border.setChecked(bool(self.config.get("animated_border", True)))
+        self.cb_border.stateChanged.connect(lambda s: self._commit("animated_border", bool(s)))
+        form.addRow("Эффекты:", self.cb_border)
 
-        self.cb_compact = QCheckBox("Компактный режим (узкая панель)")
+        self.cb_particles = QCheckBox("Светящиеся частицы")
+        self.cb_particles.setChecked(bool(self.config.get("particles", True)))
+        self.cb_particles.stateChanged.connect(lambda s: self._commit("particles", bool(s)))
+        form.addRow("", self.cb_particles)
+
+        self.cb_compact = QCheckBox("Компактный режим")
         self.cb_compact.setChecked(bool(self.config.get("compact_mode", False)))
-        self.cb_compact.stateChanged.connect(lambda s: self._commit_bool("compact_mode", s))
+        self.cb_compact.stateChanged.connect(lambda s: self._commit("compact_mode", bool(s)))
         form.addRow("Раскладка:", self.cb_compact)
 
-        btns = QHBoxLayout()
-        btn_bg = QPushButton("🖼  Выбрать фон")
-        btn_bg.setMinimumHeight(34)
+        # bg image
+        bg_row = QHBoxLayout()
+        btn_bg = QPushButton("🖼  Выбрать фон"); btn_bg.setMinimumHeight(32)
         btn_bg.clicked.connect(self._choose_background)
-        btn_clear = QPushButton("✖  Сбросить")
-        btn_clear.setMinimumHeight(34)
+        btn_clear = QPushButton("✖  Убрать"); btn_clear.setMinimumHeight(32)
         btn_clear.clicked.connect(self._clear_background)
-        btns.addWidget(btn_bg)
-        btns.addWidget(btn_clear)
-        form.addRow("Обои окна:", btns)
+        bg_row.addWidget(btn_bg); bg_row.addWidget(btn_clear)
+        form.addRow("Обои окна:", bg_row)
 
-        lay.addLayout(form)
+        lay.addLayout(form); lay.addStretch(1)
+        self.stack.addWidget(page)
+
+    # ---------- Page: Modules ----------
+    def _build_page_modules(self) -> None:
+        page, lay = self._page_scaffold(
+            "Модули оверлея",
+            "Какие блоки отображать. Отключённые модули не занимают место и не потребляют ресурсы."
+        )
+        grid = QGridLayout(); grid.setHorizontalSpacing(14); grid.setVerticalSpacing(12)
+
+        toggles = [
+            ("show_gpu", "GPU индикатор (кольцо)"),
+            ("show_cpu", "CPU карточка"),
+            ("show_ram", "RAM карточка"),
+            ("show_network", "Сеть (ping / ↑ / ↓)"),
+            ("show_music", "Медиа (трек)"),
+            ("show_visualizer", "Аудио-визуализатор"),
+            ("show_ai", "AI ассистент Silphiette"),
+            ("show_battery", "Батарея (для ноутбуков)"),
+            ("show_disk_io", "Диск I/O (чтение / запись)"),
+            ("show_cpu_temp", "Температура CPU (если доступна)"),
+            ("show_sparklines", "Мини-графики (sparklines)"),
+        ]
+        self._module_checkboxes: dict[str, QCheckBox] = {}
+        for i, (key, label) in enumerate(toggles):
+            cb = QCheckBox(label)
+            cb.setChecked(bool(self.config.get(key, True)))
+            cb.stateChanged.connect(lambda s, k=key: self._commit(k, bool(s)))
+            self._module_checkboxes[key] = cb
+            grid.addWidget(cb, i // 2, i % 2)
+
+        lay.addLayout(grid); lay.addStretch(1)
+        self.stack.addWidget(page)
+
+    # ---------- Page: Thresholds ----------
+    def _build_page_thresholds(self) -> None:
+        page, lay = self._page_scaffold(
+            "Пороги тревог",
+            "Warn — карточка окрашивается в жёлтый, Critical — в красный (+ голос для GPU, если включён)."
+        )
+
+        self.th_cpu = ThresholdEditor("CPU — загрузка", self.config.get("cpu_warn", 80), self.config.get("cpu_crit", 95))
+        self.th_cpu.changed.connect(lambda w, c: self._commit_pair("cpu_warn", w, "cpu_crit", c))
+        lay.addWidget(self.th_cpu)
+
+        self.th_ram = ThresholdEditor("RAM — заполнение", self.config.get("ram_warn", 80), self.config.get("ram_crit", 92))
+        self.th_ram.changed.connect(lambda w, c: self._commit_pair("ram_warn", w, "ram_crit", c))
+        lay.addWidget(self.th_ram)
+
+        self.th_gpu = ThresholdEditor("GPU — температура °C", self.config.get("gpu_warn", 75), self.config.get("gpu_crit", 85),
+                                       vmin=40, vmax=100, unit="°")
+        self.th_gpu.changed.connect(lambda w, c: self._commit_pair("gpu_warn", w, "gpu_crit", c))
+        lay.addWidget(self.th_gpu)
+
+        self.th_ping = ThresholdEditor("Ping — мс", self.config.get("ping_warn", 60), self.config.get("ping_crit", 120),
+                                        vmin=10, vmax=400, unit="ms")
+        self.th_ping.changed.connect(lambda w, c: self._commit_pair("ping_warn", w, "ping_crit", c))
+        lay.addWidget(self.th_ping)
+
         lay.addStretch(1)
         self.stack.addWidget(page)
 
-    def _build_page_games(self) -> None:
-        page, lay = self._page_scaffold("Игры для Smart Focus")
-
-        hint = QLabel(
-            "Оверлей появится, когда заголовок активного окна содержит одну из "
-            "этих строк. Регистр не важен."
+    # ---------- Page: Presets ----------
+    def _build_page_presets(self) -> None:
+        page, lay = self._page_scaffold(
+            "Темы-пресеты",
+            "Одним кликом применяют полный визуальный комплект: акцент, прозрачность, эффекты и раскладку."
         )
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #8891b0; font-size: 11px;")
-        lay.addWidget(hint)
 
+        grid = QGridLayout(); grid.setHorizontalSpacing(12); grid.setVerticalSpacing(12)
+        self._preset_cards: list[PresetCard] = []
+        current = self.config.get("theme_preset", "Neon Mint")
+        for i, (name, preset) in enumerate(THEME_PRESETS.items()):
+            card = PresetCard(name, preset)
+            card.setChecked(name == current)
+            card.clicked.connect(lambda _c=False, n=name: self._apply_preset(n))
+            self._preset_cards.append(card)
+            grid.addWidget(card, i // 3, i % 3)
+        lay.addLayout(grid)
+
+        lay.addStretch(1)
+        self.stack.addWidget(page)
+
+    # ---------- Page: Games ----------
+    def _build_page_games(self) -> None:
+        page, lay = self._page_scaffold(
+            "Игры для Smart Focus",
+            "Оверлей появится, когда заголовок активного окна содержит одну из этих строк (регистр не важен)."
+        )
         self.games_list = QListWidget()
         for g in self.config.get("target_games", []):
             QListWidgetItem(g, self.games_list)
@@ -1013,57 +1725,75 @@ class ModernSettings(QDialog):
         self.games_input = QLineEdit()
         self.games_input.setPlaceholderText("Название или часть названия игры…")
         self.games_input.returnPressed.connect(self._add_game)
-        btn_add = QPushButton("➕  Добавить")
-        btn_add.clicked.connect(self._add_game)
-        btn_rm = QPushButton("🗑  Удалить")
-        btn_rm.clicked.connect(self._remove_game)
-        row.addWidget(self.games_input, 1)
-        row.addWidget(btn_add)
-        row.addWidget(btn_rm)
+        btn_add = QPushButton("➕  Добавить"); btn_add.clicked.connect(self._add_game)
+        btn_rm = QPushButton("🗑  Удалить"); btn_rm.clicked.connect(self._remove_game)
+        row.addWidget(self.games_input, 1); row.addWidget(btn_add); row.addWidget(btn_rm)
         lay.addLayout(row)
 
         self.stack.addWidget(page)
 
+    # ---------- Page: About ----------
     def _build_page_about(self) -> None:
         page, lay = self._page_scaffold("О программе")
-
         accent = self.config["accent_color"]
-        info = QTextEdit()
-        info.setReadOnly(True)
-        info.setFrameStyle(QFrame.Shape.NoFrame)
+        info = QTextEdit(); info.setReadOnly(True); info.setFrameStyle(QFrame.Shape.NoFrame)
         info.setHtml(
             f"""
             <div style="color:#ffffff;font-family:'Segoe UI';">
-              <div style="font-size:22px;font-weight:900;color:{accent};">👻 Phantom Overlay</div>
-              <div style="color:#a8b2d1;font-size:11px;margin-top:2px;">
-                Premium Edition · v{APP_VERSION}
-              </div>
+              <div style="font-size:22px;font-weight:900;color:{accent};">👻 Phantom Overlay · Hyper Edition</div>
+              <div style="color:#a8b2d1;font-size:11px;margin-top:2px;">v{APP_VERSION}</div>
 
               <p style="color:#b6beda;font-size:12px;line-height:1.6;margin-top:18px;">
-                Phantom — минималистичный внутриигровой HUD нового поколения:
-                круговой индикатор температуры GPU, карточки CPU/RAM с плавной
-                анимацией значений и мини-графиками истории, живое статус-ядро
-                и frosted-glass панель с мягким свечением акцента.
+                Phantom — кастомный внутриигровой HUD нового поколения с
+                полностью настраиваемым визуалом: круговой GPU-gauge, анимация
+                значений, летающие частицы, conic-бордер, музыкальный
+                визуализатор, 8 тем-пресетов и живой preview прямо в настройках.
               </p>
 
               <p style="color:#8891b0;font-size:11px;">
-                <b>Хоткей по умолчанию:</b> Ctrl + Shift + P.
-                <br>Настройки автоматически сохраняются в
-                <code>phantom_config.json</code>.
+                <b>Хоткей:</b> Ctrl+Shift+P по дефолту. Настраивается через
+                реальный recorder клавиш во вкладке «Общие».
+                <br>Все настройки сохраняются в <code>phantom_config.json</code>.
               </p>
 
               <p style="color:#8891b0;font-size:11px;margin-top:18px;">
-                Лицензия: MIT &nbsp;·&nbsp; Стек: PyQt6, psutil, ping3, winsdk,
-                pypresence &nbsp;·&nbsp; Автор: iq28qi
+                Лицензия: MIT · PyQt6, psutil, ping3, winsdk, pypresence
+                <br>Автор: iq28qi
               </p>
             </div>
             """
         )
         lay.addWidget(info, 1)
-
         self.stack.addWidget(page)
 
-    # ---------- handlers ----------
+    # ---------- commit helpers ----------
+    def _commit(self, key: str, value, save: bool = True, apply_live: bool = True,
+                rehook: bool = False, rewindow: bool = False,
+                apply_interval: bool = False, apply_geometry: bool = False) -> None:
+        self.config[key] = value
+        if save:
+            save_config(self.config)
+        if apply_live and self.parent_overlay:
+            self.parent_overlay.apply_config()
+        if rehook and self.parent_overlay:
+            self.parent_overlay.register_hotkey()
+        if rewindow and self.parent_overlay:
+            self.parent_overlay.apply_window_flags()
+        if apply_interval and self.parent_overlay:
+            self.parent_overlay.apply_interval()
+        if apply_geometry and self.parent_overlay:
+            self.parent_overlay.apply_corner_snap()
+        self.preview.apply_config(self.config)
+        self._apply_styles()
+
+    def _commit_pair(self, k1, v1, k2, v2) -> None:
+        self.config[k1] = int(v1); self.config[k2] = int(v2)
+        save_config(self.config)
+        if self.parent_overlay:
+            self.parent_overlay.apply_config()
+        self.preview.apply_config(self.config)
+
+    # ---------- accent ----------
     def _refresh_accent_swatch(self) -> None:
         c = self.config.get("accent_color", "#00ff99")
         self.accent_swatch.setText(f"  {c.upper()}")
@@ -1082,6 +1812,7 @@ class ModernSettings(QDialog):
         if self.parent_overlay:
             self.parent_overlay.apply_config()
             self.parent_overlay.rebuild_tray_menu_styles()
+        self.preview.apply_config(self.config)
 
     def _pick_accent(self) -> None:
         initial = QColor(self.config.get("accent_color", "#00ff99"))
@@ -1089,58 +1820,19 @@ class ModernSettings(QDialog):
         if color.isValid():
             self._set_accent(color.name())
 
-    def _commit_opacity_live(self, val: int) -> None:
-        self.config["opacity"] = int(val)
-        if self.parent_overlay:
-            self.parent_overlay.apply_config()
-
-    def _commit_interval(self, val: int) -> None:
-        self.config["update_interval_ms"] = int(val)
-        save_config(self.config)
-        if self.parent_overlay:
-            self.parent_overlay.apply_interval()
-
-    def _commit_hotkey(self) -> None:
-        text = self.input_hotkey.text().strip()
-        if not text:
-            return
-        self.config["hotkey_toggle"] = text
-        save_config(self.config)
-        if self.parent_overlay:
-            self.parent_overlay.register_hotkey()
-
-    def _commit_bool(self, key: str, state: int) -> None:
-        self.config[key] = bool(state)
-        save_config(self.config)
-        if self.parent_overlay:
-            self.parent_overlay.apply_config()
-
-    def _commit_taskbar(self, state: int) -> None:
-        self.config["show_in_taskbar"] = bool(state)
-        save_config(self.config)
-        if self.parent_overlay:
-            self.parent_overlay.apply_window_flags()
-
+    # ---------- bg image ----------
     def _choose_background(self) -> None:
-        fname, _ = QFileDialog.getOpenFileName(
-            self, "Выбрать фон", "", "Images (*.png *.jpg *.jpeg)"
-        )
+        fname, _ = QFileDialog.getOpenFileName(self, "Выбрать фон", "", "Images (*.png *.jpg *.jpeg)")
         if fname:
-            self.config["bg_image"] = fname
-            save_config(self.config)
-            if self.parent_overlay:
-                self.parent_overlay.apply_config()
+            self._commit("bg_image", fname)
 
     def _clear_background(self) -> None:
-        self.config["bg_image"] = ""
-        save_config(self.config)
-        if self.parent_overlay:
-            self.parent_overlay.apply_config()
+        self._commit("bg_image", "")
 
+    # ---------- games ----------
     def _add_game(self) -> None:
         name = self.games_input.text().strip()
-        if not name:
-            return
+        if not name: return
         self.games_input.clear()
         QListWidgetItem(name, self.games_list)
         self._commit_games()
@@ -1155,270 +1847,168 @@ class ModernSettings(QDialog):
         self.config["target_games"] = games
         save_config(self.config)
 
+    # ---------- presets ----------
+    def _apply_preset(self, name: str) -> None:
+        preset = THEME_PRESETS.get(name)
+        if not preset: return
+        for k, v in preset.items():
+            self.config[k] = v
+        self.config["theme_preset"] = name
+        save_config(self.config)
+        self._refresh_accent_swatch()
+        self.slider_opacity.blockSignals(True); self.slider_opacity.setValue(int(self.config["opacity"])); self.slider_opacity.blockSignals(False)
+        self.cb_border.blockSignals(True); self.cb_border.setChecked(bool(self.config["animated_border"])); self.cb_border.blockSignals(False)
+        self.cb_particles.blockSignals(True); self.cb_particles.setChecked(bool(self.config["particles"])); self.cb_particles.blockSignals(False)
+        self.cb_compact.blockSignals(True); self.cb_compact.setChecked(bool(self.config["compact_mode"])); self.cb_compact.blockSignals(False)
+        for card in self._preset_cards:
+            card.setChecked(card._name == name)
+        if self.parent_overlay:
+            self.parent_overlay.apply_config()
+            self.parent_overlay.rebuild_tray_menu_styles()
+        self.preview.apply_config(self.config)
+        self._apply_styles()
+
+    # ---------- import / export / reset ----------
+    def _export_config(self) -> None:
+        fname, _ = QFileDialog.getSaveFileName(self, "Экспорт конфигурации", "phantom_config.json", "JSON (*.json)")
+        if not fname: return
+        try:
+            with open(fname, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=4, ensure_ascii=False)
+            QMessageBox.information(self, "Экспорт", f"Конфигурация сохранена:\n{fname}")
+        except OSError as e:
+            log_err("export", e)
+            QMessageBox.warning(self, "Экспорт", f"Не удалось сохранить файл: {e}")
+
+    def _import_config(self) -> None:
+        fname, _ = QFileDialog.getOpenFileName(self, "Импорт конфигурации", "", "JSON (*.json)")
+        if not fname: return
+        try:
+            with open(fname, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for k, v in data.items():
+                if k in DEFAULT_CONFIG or k == "target_games":
+                    self.config[k] = v
+            save_config(self.config)
+            if self.parent_overlay:
+                self.parent_overlay.apply_config()
+                self.parent_overlay.register_hotkey()
+                self.parent_overlay.apply_interval()
+                self.parent_overlay.apply_window_flags()
+                self.parent_overlay.apply_corner_snap()
+            self._apply_styles()
+            self.preview.apply_config(self.config)
+            QMessageBox.information(self, "Импорт", "Конфигурация импортирована.\nПерезайдите в окно настроек, чтобы увидеть все поля.")
+        except (OSError, json.JSONDecodeError) as e:
+            log_err("import", e)
+            QMessageBox.warning(self, "Импорт", f"Не удалось прочитать файл: {e}")
+
+    def _reset_config(self) -> None:
+        ans = QMessageBox.question(
+            self, "Сброс",
+            "Сбросить настройки до значений по умолчанию?\nТекущая конфигурация будет перезаписана.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes: return
+        for k, v in DEFAULT_CONFIG.items():
+            self.config[k] = list(v) if isinstance(v, list) else v
+        save_config(self.config)
+        if self.parent_overlay:
+            self.parent_overlay.apply_config()
+            self.parent_overlay.register_hotkey()
+            self.parent_overlay.apply_interval()
+            self.parent_overlay.apply_window_flags()
+            self.parent_overlay.apply_corner_snap()
+        self._apply_styles()
+        self.preview.apply_config(self.config)
+        QMessageBox.information(self, "Сброс", "Настройки сброшены к значениям по умолчанию.")
+
     # ---------- styles ----------
     def _apply_styles(self) -> None:
         accent = self.config.get("accent_color", "#00ff99")
         self.setStyleSheet(
             f"""
-            QDialog {{
-                background-color: #0b0b10;
-            }}
-            QWidget#side {{
-                background-color: #0e0e14;
-                border-right: 1px solid #1a1a24;
-            }}
-            QStackedWidget#stack {{
-                background-color: #0b0b10;
-            }}
-            QLabel {{
-                color: #b6beda;
-                font-family: 'Segoe UI';
-                font-size: 12px;
-                font-weight: 600;
-            }}
-            QListWidget#nav {{
-                background: transparent;
-                color: #a8b2d1;
-                font-family: 'Segoe UI';
-                font-size: 12px;
-                font-weight: 700;
-                border: none;
-                outline: 0;
-            }}
-            QListWidget#nav::item {{
-                padding: 10px 12px;
-                border-radius: 8px;
-                margin: 3px 0;
-            }}
-            QListWidget#nav::item:hover {{
-                background: rgba(255,255,255,10);
-                color: #ffffff;
-            }}
-            QListWidget#nav::item:selected {{
-                background: rgba(255,255,255,14);
-                color: {accent};
-                border-left: 2px solid {accent};
-            }}
-            QLineEdit, QSpinBox {{
-                background-color: #14141c;
-                color: {accent};
-                border: 1px solid #1f1f27;
-                border-radius: 8px;
-                padding: 8px 10px;
-                font-family: 'Segoe UI';
-                font-weight: 800;
-                font-size: 12px;
-            }}
-            QLineEdit:focus, QSpinBox:focus {{
-                border: 1px solid {accent};
-            }}
-            QSlider::groove:horizontal {{
-                border-radius: 4px;
-                height: 8px;
-                background: #1f1f27;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 {accent}, stop:1 rgba(255,255,255,220));
-                border-radius: 4px;
-            }}
-            QSlider::handle:horizontal {{
-                background: #ffffff;
-                width: 18px;
-                height: 18px;
-                margin: -6px 0;
-                border-radius: 9px;
-                border: 2px solid {accent};
-            }}
-            QPushButton {{
-                background-color: #14141c;
-                color: {accent};
-                border: 1px solid rgba(255,255,255,24);
-                border-radius: 10px;
-                padding: 6px 14px;
-                font-weight: 800;
-                font-family: 'Segoe UI';
-            }}
-            QPushButton:hover {{
-                background-color: rgba(0,255,153,18);
-                border: 1px solid {accent};
-            }}
-            QPushButton#done_btn {{
-                background-color: {accent};
-                color: #0b0b10;
-                border: none;
-                letter-spacing: 0.8px;
-            }}
-            QPushButton#done_btn:hover {{
-                background-color: rgba(255,255,255,230);
-                color: #0b0b10;
-            }}
-            QCheckBox {{
-                color: #e6e9f2;
-                font-family: 'Segoe UI';
-                font-size: 12px;
-                spacing: 10px;
-            }}
-            QCheckBox::indicator {{
-                width: 38px;
-                height: 20px;
-                border-radius: 10px;
-                background-color: #1f1f27;
-                border: 1px solid #2a2a36;
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {accent};
-                border: 1px solid {accent};
-            }}
-            QListWidget {{
-                background-color: #14141c;
-                color: #e6e9f2;
-                border: 1px solid #1f1f27;
-                border-radius: 10px;
-                padding: 6px;
-                font-family: 'Segoe UI';
-                font-size: 12px;
-            }}
-            QListWidget::item {{
-                padding: 7px 10px;
-                border-radius: 6px;
-            }}
-            QListWidget::item:selected {{
-                background: {accent};
-                color: #0b0b10;
-                font-weight: 900;
-            }}
-            QTextEdit {{
-                background: transparent;
-                border: none;
-            }}
+            QDialog {{ background-color: #0b0b10; color: #e6e9f2; }}
+            QWidget {{ color: #e6e9f2; }}
+            QWidget#side {{ background-color: #0e0e14; border-right: 1px solid #1a1a24; }}
+            QWidget#preview_holder {{ background-color: #09090d; border-left: 1px solid #1a1a24; }}
+            QStackedWidget#stack {{ background-color: #0b0b10; }}
+            QLabel {{ color: #c7cde3; font-family: 'Segoe UI'; font-size: 12px; font-weight: 600; background: transparent; }}
+            QLabel#page_title {{ color: #ffffff; font-family: 'Segoe UI'; font-size: 20px; font-weight: 900; letter-spacing: 0.6px; }}
+            QLabel#page_subtitle {{ color: #8891b0; font-size: 11px; font-weight: 500; }}
+            QLabel#threshold_section {{ color: #ffffff; font-family: 'Segoe UI'; font-size: 12px; font-weight: 900; letter-spacing: 0.8px; }}
+            QLabel#brand {{ color: {accent}; font-family: 'Segoe UI'; font-size: 14px; font-weight: 900; letter-spacing: 2.5px; }}
+            QLabel#brand_version {{ color: #8891b0; font-size: 10px; letter-spacing: 0.6px; font-weight: 600; }}
+            QLabel#live_title {{ color: #8891b0; font-family: 'Segoe UI'; font-size: 10px; font-weight: 900; letter-spacing: 2.2px; }}
+            QLabel#live_hint {{ color: #6b7596; font-size: 10px; font-weight: 500; }}
+            QListWidget#nav {{ background: transparent; color: #a8b2d1; font-family: 'Segoe UI';
+                font-size: 12px; font-weight: 700; border: none; outline: 0; }}
+            QListWidget#nav::item {{ padding: 10px 12px; border-radius: 8px; margin: 3px 0; }}
+            QListWidget#nav::item:hover {{ background: rgba(255,255,255,10); color: #ffffff; }}
+            QListWidget#nav::item:selected {{ background: rgba(255,255,255,14); color: {accent};
+                border-left: 2px solid {accent}; }}
+            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
+                background-color: #14141c; color: {accent};
+                border: 1px solid #1f1f27; border-radius: 8px; padding: 7px 10px;
+                font-family: 'Segoe UI'; font-weight: 800; font-size: 12px; }}
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
+                border: 1px solid {accent}; }}
+            QComboBox::drop-down {{ border: none; width: 18px; }}
+            QComboBox QAbstractItemView {{ background-color: #14141c; color: #ffffff;
+                selection-background-color: {accent}; selection-color: #0b0b10;
+                border: 1px solid #1f1f27; }}
+            QSlider::groove:horizontal {{ border-radius: 4px; height: 8px; background: #1f1f27; }}
+            QSlider::sub-page:horizontal {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                stop:0 {accent}, stop:1 rgba(255,255,255,220)); border-radius: 4px; }}
+            QSlider::handle:horizontal {{ background: #ffffff; width: 18px; height: 18px;
+                margin: -6px 0; border-radius: 9px; border: 2px solid {accent}; }}
+            QPushButton {{ background-color: #14141c; color: {accent};
+                border: 1px solid rgba(255,255,255,24); border-radius: 10px;
+                padding: 7px 14px; font-weight: 800; font-family: 'Segoe UI'; }}
+            QPushButton:hover {{ background-color: rgba(0,255,153,18); border: 1px solid {accent}; }}
+            QPushButton#done_btn {{ background-color: {accent}; color: #0b0b10; border: none; letter-spacing: 0.8px; }}
+            QPushButton#done_btn:hover {{ background-color: rgba(255,255,255,230); color: #0b0b10; }}
+            QPushButton#reset_btn {{ color: #ff8888; border-color: rgba(255,90,90,60); }}
+            QPushButton#reset_btn:hover {{ background: rgba(255,90,90,30); border-color: #ff5c5c; color: #ffffff; }}
+            QCheckBox {{ color: #ffffff; font-family: 'Segoe UI'; font-size: 12px; spacing: 10px; background: transparent; }}
+            QCheckBox::indicator {{ width: 38px; height: 20px; border-radius: 10px;
+                background-color: #1f1f27; border: 1px solid #2a2a36; }}
+            QCheckBox::indicator:checked {{ background-color: {accent}; border: 1px solid {accent}; }}
+            QListWidget {{ background-color: #14141c; color: #e6e9f2;
+                border: 1px solid #1f1f27; border-radius: 10px; padding: 6px;
+                font-family: 'Segoe UI'; font-size: 12px; }}
+            QListWidget::item {{ padding: 7px 10px; border-radius: 6px; }}
+            QListWidget::item:selected {{ background: {accent}; color: #0b0b10; font-weight: 900; }}
+            QTextEdit {{ background: transparent; border: none; }}
+            QScrollArea {{ background: transparent; border: none; }}
+            QFrame#live_preview {{ background: transparent; }}
+            QScrollBar:vertical {{ background: transparent; width: 10px; }}
+            QScrollBar::handle:vertical {{ background: rgba(255,255,255,30); border-radius: 5px; }}
+            QScrollBar::handle:vertical:hover {{ background: rgba(255,255,255,60); }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             """
         )
 
 
 # ==========================================================
-#                   ГЛАВНЫЙ ОВЕРЛЕЙ
+#                    ГЛАВНЫЙ ОВЕРЛЕЙ
 # ==========================================================
-class GlassPanel(QWidget):
-    """Кастомный рендеринг премиум-фона с frosted-glass эффектом."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._accent = QColor("#00ff99")
-        self._bg_pixmap: QPixmap | None = None
-        self._noise: QPixmap | None = None
-        self._unlocked = False
-
-    def set_accent(self, color: str) -> None:
-        self._accent = QColor(color)
-        self.update()
-
-    def set_background_image(self, path: str) -> None:
-        if path and os.path.exists(path):
-            self._bg_pixmap = QPixmap(path)
-        else:
-            self._bg_pixmap = None
-        self.update()
-
-    def set_unlocked(self, unlocked: bool) -> None:
-        self._unlocked = bool(unlocked)
-        self.update()
-
-    def _make_noise(self, w: int, h: int) -> QPixmap:
-        if self._noise is not None and self._noise.width() == w and self._noise.height() == h:
-            return self._noise
-        img = QImage(w, h, QImage.Format.Format_ARGB32)
-        img.fill(Qt.GlobalColor.transparent)
-        rnd = random.Random(42)
-        for _ in range(w * h // 28):
-            x = rnd.randint(0, w - 1)
-            y = rnd.randint(0, h - 1)
-            a = rnd.randint(6, 18)
-            img.setPixelColor(x, y, QColor(255, 255, 255, a))
-        self._noise = QPixmap.fromImage(img)
-        return self._noise
-
-    def paintEvent(self, _event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
-        w = self.width()
-        h = self.height()
-        radius = 20.0
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, w, h), radius, radius)
-        painter.setClipPath(path)
-
-        # ---- base gradient ----
-        grad = QLinearGradient(0, 0, 0, h)
-        grad.setColorAt(0.0, QColor(22, 22, 32, 245))
-        grad.setColorAt(1.0, QColor(9, 9, 14, 245))
-        painter.fillRect(self.rect(), QBrush(grad))
-
-        # ---- optional user background ----
-        if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
-            scaled = self._bg_pixmap.scaled(
-                w, h,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            painter.setOpacity(0.35)
-            painter.drawPixmap(0, 0, scaled)
-            painter.setOpacity(1.0)
-
-        # ---- accent corner glow (top-left) ----
-        accent_glow = QRadialGradient(0, 0, max(w, h))
-        c1 = QColor(self._accent); c1.setAlpha(80)
-        c2 = QColor(self._accent); c2.setAlpha(0)
-        accent_glow.setColorAt(0.0, c1)
-        accent_glow.setColorAt(0.9, c2)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(accent_glow))
-        painter.drawRect(self.rect())
-
-        # ---- soft secondary glow (bottom-right, cool blue) ----
-        cool = QColor("#5a7dff")
-        cool_glow = QRadialGradient(float(w), float(h), max(w, h) * 0.9)
-        cc1 = QColor(cool); cc1.setAlpha(60)
-        cc2 = QColor(cool); cc2.setAlpha(0)
-        cool_glow.setColorAt(0.0, cc1)
-        cool_glow.setColorAt(1.0, cc2)
-        painter.setBrush(QBrush(cool_glow))
-        painter.drawRect(self.rect())
-
-        # ---- noise texture ----
-        painter.drawPixmap(0, 0, self._make_noise(w, h))
-
-        # ---- top highlight line ----
-        painter.setPen(QPen(QColor(255, 255, 255, 24), 1))
-        painter.drawLine(int(radius / 2), 1, int(w - radius / 2), 1)
-
-        # ---- outer border ----
-        border = QColor(self._accent) if self._unlocked else QColor(255, 255, 255, 36)
-        if self._unlocked:
-            pen = QPen(border)
-            pen.setWidth(2)
-            pen.setStyle(Qt.PenStyle.DashLine)
-        else:
-            pen = QPen(border)
-            pen.setWidth(1)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
-
-
 class PhantomOverlay(QMainWindow):
     toggle_signal = pyqtSignal()
+    settings_signal = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.config = load_config()
         self.core = PhantomCore()
+        if self.config.get("discord_enabled") and self.config.get("discord_client_id"):
+            self.core.init_discord(self.config["discord_client_id"])
         self.is_locked = True
         self.manual_hidden = False
         self.dragPos = QPoint()
-        self.current_hotkey = None
+        self.current_toggle_hotkey = None
+        self.current_settings_hotkey = None
         self._start_time = time.time()
         self._prev_ai_text = ""
 
@@ -1433,8 +2023,10 @@ class PhantomOverlay(QMainWindow):
         self.move(self.config.get("pos_x", 100), self.config.get("pos_y", 100))
         self.setup_tray()
         self.apply_config()
+        self.apply_corner_snap()
 
         self.toggle_signal.connect(self.do_toggle_visibility)
+        self.settings_signal.connect(self.open_settings)
         self.register_hotkey()
 
         self._uptime_timer = QTimer(self)
@@ -1456,93 +2048,91 @@ class PhantomOverlay(QMainWindow):
         self.setCentralWidget(self.panel)
 
         root = QVBoxLayout(self.panel)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 14, 18, 14); root.setSpacing(10)
 
-        # ==================== HEADER ====================
-        header = QHBoxLayout()
-        header.setSpacing(8)
+        # particles overlay (painted on top of panel body but below content via same layout)
+        self.particles = ParticleField(self.panel)
+        self.particles.lower()
+        self.particles.setGeometry(0, 0, self.width(), self.height())
 
+        # Header
+        header = QHBoxLayout(); header.setSpacing(8)
         self.status_dot = StatusDot()
         self.lbl_title = QLabel("PHANTOM")
-        tfont = QFont("Segoe UI", 12)
-        tfont.setWeight(QFont.Weight.Black)
+        tfont = QFont("Segoe UI", 12); tfont.setWeight(QFont.Weight.Black)
         tfont.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.0)
         self.lbl_title.setFont(tfont)
         self.lbl_title.setStyleSheet("color: #ffffff;")
 
         self.lbl_uptime = QLabel("00:00")
-        ufont = QFont("Consolas", 9)
-        ufont.setWeight(QFont.Weight.DemiBold)
+        ufont = QFont("Consolas", 9); ufont.setWeight(QFont.Weight.DemiBold)
         self.lbl_uptime.setFont(ufont)
         self.lbl_uptime.setStyleSheet(
-            "color: rgba(255,255,255,140); "
-            "background: rgba(255,255,255,14); "
-            "border: 1px solid rgba(255,255,255,24); "
-            "border-radius: 8px; padding: 2px 8px;"
+            "color: rgba(255,255,255,140); background: rgba(255,255,255,14); "
+            "border: 1px solid rgba(255,255,255,24); border-radius: 8px; padding: 2px 8px;"
         )
 
         self.btn_settings = IconButton("⚙", "Настройки")
         self.btn_settings.clicked.connect(self.open_settings)
-        self.btn_hide = IconButton("—", "Скрыть (hotkey)")
+        self.btn_hide = IconButton("—", "Скрыть")
         self.btn_hide.clicked.connect(lambda: self.toggle_signal.emit())
         self.btn_quit = IconButton("✕", "Выйти")
         self.btn_quit.clicked.connect(self._quit_app)
 
-        header.addWidget(self.status_dot)
-        header.addWidget(self.lbl_title)
-        header.addSpacing(6)
-        header.addWidget(self.lbl_uptime)
-        header.addStretch(1)
-        header.addWidget(self.btn_settings)
-        header.addWidget(self.btn_hide)
-        header.addWidget(self.btn_quit)
+        header.addWidget(self.status_dot); header.addWidget(self.lbl_title)
+        header.addSpacing(6); header.addWidget(self.lbl_uptime); header.addStretch(1)
+        header.addWidget(self.btn_settings); header.addWidget(self.btn_hide); header.addWidget(self.btn_quit)
         root.addLayout(header)
 
-        # separator
-        self.sep = QFrame()
-        self.sep.setFixedHeight(1)
+        # Chips row (battery / cpu_temp / disk)
+        chips_row = QHBoxLayout(); chips_row.setSpacing(6)
+        self.chip_battery = Chip(); self.chip_battery.setText("🔋 —")
+        self.chip_cpu_temp = Chip(); self.chip_cpu_temp.setText("🌡 —")
+        self.chip_disk = Chip(); self.chip_disk.setText("💽 —")
+        chips_row.addWidget(self.chip_battery); chips_row.addWidget(self.chip_cpu_temp)
+        chips_row.addWidget(self.chip_disk); chips_row.addStretch(1)
+        self._chips_wrapper = QWidget(); self._chips_wrapper.setLayout(chips_row)
+        root.addWidget(self._chips_wrapper)
+
+        self.sep = QFrame(); self.sep.setFixedHeight(1)
         self.sep.setStyleSheet("background: rgba(255,255,255,22); border: none;")
         root.addWidget(self.sep)
 
-        # ==================== BODY ====================
-        body = QHBoxLayout()
-        body.setSpacing(12)
-
+        # Body
+        body = QHBoxLayout(); body.setSpacing(12)
         accent = self.config.get("accent_color", "#00ff99")
-        self.gauge = CircularGauge(accent=accent)
+        self.gauge = CircularGauge(accent=accent,
+                                   warn=self.config.get("gpu_warn", 75),
+                                   crit=self.config.get("gpu_crit", 85))
         body.addWidget(self.gauge, 0, Qt.AlignmentFlag.AlignTop)
 
-        cards_col = QVBoxLayout()
-        cards_col.setSpacing(8)
-
+        cards_col = QVBoxLayout(); cards_col.setSpacing(8)
         show_spark = bool(self.config.get("show_sparklines", True))
-        self.card_cpu = MetricCard("🧠", "CPU", accent=accent, show_sparkline=show_spark)
-        self.card_ram = MetricCard("💾", "RAM", accent=accent, show_sparkline=show_spark)
-        cards_col.addWidget(self.card_cpu)
-        cards_col.addWidget(self.card_ram)
+        self.card_cpu = MetricCard("🧠", "CPU", accent=accent, show_sparkline=show_spark,
+                                   warn=self.config.get("cpu_warn", 80), crit=self.config.get("cpu_crit", 95))
+        self.card_ram = MetricCard("💾", "RAM", accent=accent, show_sparkline=show_spark,
+                                   warn=self.config.get("ram_warn", 80), crit=self.config.get("ram_crit", 92))
+        cards_col.addWidget(self.card_cpu); cards_col.addWidget(self.card_ram)
         body.addLayout(cards_col, 1)
-
         root.addLayout(body)
 
-        # ==================== FOOTER ====================
+        # Visualizer
+        self.visualizer = MusicVisualizer(accent=accent)
+        root.addWidget(self.visualizer)
+
+        # Footer
         self.lbl_net = QLabel()
-        nfont = QFont("Consolas", 9)
-        nfont.setWeight(QFont.Weight.DemiBold)
+        nfont = QFont("Consolas", 9); nfont.setWeight(QFont.Weight.DemiBold)
         self.lbl_net.setFont(nfont)
-        self.lbl_net.setStyleSheet(
-            "color: rgba(255,255,255,170); "
-            "background: rgba(255,255,255,10); "
-            "border: 1px solid rgba(255,255,255,20); "
-            "border-radius: 8px; padding: 4px 10px;"
-        )
         self.lbl_net.setText("🌐  —  ·  ↑ 0 KB/s  ·  ↓ 0 KB/s")
+        self.lbl_net.setStyleSheet(
+            "color: rgba(255,255,255,170); background: rgba(255,255,255,10); "
+            "border: 1px solid rgba(255,255,255,20); border-radius: 8px; padding: 4px 10px;"
+        )
         root.addWidget(self.lbl_net)
 
         self.lbl_music = Marquee()
-        mfont = QFont("Segoe UI", 10)
-        mfont.setItalic(True)
-        mfont.setWeight(QFont.Weight.Medium)
+        mfont = QFont("Segoe UI", 10); mfont.setItalic(True); mfont.setWeight(QFont.Weight.Medium)
         self.lbl_music.setFont(mfont)
         self.lbl_music.setStyleSheet("color: rgba(255,255,255,180);")
         self.lbl_music.setFixedHeight(18)
@@ -1550,59 +2140,87 @@ class PhantomOverlay(QMainWindow):
         root.addWidget(self.lbl_music)
 
         self.lbl_ai = QLabel("🤖  Silphiette: работаю…")
-        afont = QFont("Segoe UI", 10)
-        afont.setWeight(QFont.Weight.DemiBold)
-        afont.setItalic(True)
+        afont = QFont("Segoe UI", 10); afont.setWeight(QFont.Weight.DemiBold); afont.setItalic(True)
         self.lbl_ai.setFont(afont)
         self.lbl_ai.setStyleSheet("color: #ffcc66;")
         self.lbl_ai.setWordWrap(True)
         root.addWidget(self.lbl_ai)
 
-        # Drop shadow
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(48)
-        shadow.setXOffset(0)
-        shadow.setYOffset(10)
+        shadow.setBlurRadius(48); shadow.setXOffset(0); shadow.setYOffset(10)
         shadow.setColor(QColor(0, 0, 0, 210))
         self.panel.setGraphicsEffect(shadow)
 
         self._resize_for_mode()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "particles"):
+            self.particles.setGeometry(0, 0, self.width(), self.height())
+
     def _resize_for_mode(self) -> None:
         if self.config.get("compact_mode", False):
-            self.resize(300, 260)
+            self.resize(300, 320)
         else:
-            self.resize(360, 310)
+            self.resize(360, 380)
 
-    # ---------- hotkey ----------
+    # ---------- hotkeys ----------
     def register_hotkey(self):
         try:
-            if self.current_hotkey:
-                try:
-                    keyboard.remove_hotkey(self.current_hotkey)
-                except Exception as e:
-                    log_err("hotkey.remove", e)
-            self.current_hotkey = self.config.get("hotkey_toggle", "ctrl+shift+p")
-            if self.current_hotkey:
-                keyboard.add_hotkey(self.current_hotkey, lambda: self.toggle_signal.emit())
+            for existing in (self.current_toggle_hotkey, self.current_settings_hotkey):
+                if existing:
+                    try:
+                        keyboard.remove_hotkey(existing)
+                    except Exception as e:
+                        log_err("hotkey.remove", e)
+            self.current_toggle_hotkey = self.config.get("hotkey_toggle", "ctrl+shift+p")
+            self.current_settings_hotkey = self.config.get("hotkey_settings", "")
+            if self.current_toggle_hotkey:
+                keyboard.add_hotkey(self.current_toggle_hotkey,
+                                    lambda: self.toggle_signal.emit())
+            if self.current_settings_hotkey:
+                keyboard.add_hotkey(self.current_settings_hotkey,
+                                    lambda: self.settings_signal.emit())
         except Exception as e:
             log_err("hotkey.add", e)
 
     # ---------- window flags ----------
     def apply_window_flags(self):
-        base_flags = (
-            Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint
-        )
+        base = Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint
         if not self.config.get("show_in_taskbar", False):
-            base_flags |= Qt.WindowType.Tool
+            base |= Qt.WindowType.Tool
         else:
-            base_flags |= Qt.WindowType.Window
-        self.setWindowFlags(base_flags)
+            base |= Qt.WindowType.Window
+        self.setWindowFlags(base)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, self.is_locked)
-
         if self.isVisible():
-            self.hide()
-            self.show()
+            self.hide(); self.show()
+
+    # ---------- corner snap ----------
+    def apply_corner_snap(self) -> None:
+        corner = self.config.get("corner_snap", "none")
+        if corner == "none":
+            return
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        g = screen.availableGeometry()
+        m = int(self.config.get("corner_margin", 24))
+        w = self.width() or 360
+        h = self.height() or 380
+        if corner == "tl":
+            x, y = g.x() + m, g.y() + m
+        elif corner == "tr":
+            x, y = g.x() + g.width() - w - m, g.y() + m
+        elif corner == "bl":
+            x, y = g.x() + m, g.y() + g.height() - h - m
+        elif corner == "br":
+            x, y = g.x() + g.width() - w - m, g.y() + g.height() - h - m
+        else:
+            return
+        self.move(x, y)
+        self.config["pos_x"], self.config["pos_y"] = x, y
+        save_config(self.config)
 
     # ---------- animations ----------
     def fade_in_anim(self):
@@ -1616,8 +2234,7 @@ class PhantomOverlay(QMainWindow):
     def do_toggle_visibility(self):
         self.manual_hidden = not self.manual_hidden
         if not self.manual_hidden:
-            self.show()
-            self.fade_in_anim()
+            self.show(); self.fade_in_anim()
         else:
             self.hide()
 
@@ -1631,24 +2248,56 @@ class PhantomOverlay(QMainWindow):
     def apply_config(self):
         if not hasattr(self, "anim") or self.anim.state() != QPropertyAnimation.State.Running:
             self.setWindowOpacity(max(0.1, self.config["opacity"] / 255.0))
-
         accent = self.config.get("accent_color", "#00ff99")
         show_spark = bool(self.config.get("show_sparklines", True))
 
-        self.card_cpu.set_accent(accent)
-        self.card_ram.set_accent(accent)
-        self.gauge.set_accent(accent)
+        # accents
+        self.card_cpu.set_accent(accent); self.card_ram.set_accent(accent)
+        self.gauge.set_accent(accent); self.visualizer.set_accent(accent)
+        self.particles.set_accent(accent)
+        self.panel.set_accent(accent)
+        self.chip_battery.set_accent(accent); self.chip_cpu_temp.set_accent(accent); self.chip_disk.set_accent(accent)
+
+        # thresholds
+        self.card_cpu.set_thresholds(self.config.get("cpu_warn", 80), self.config.get("cpu_crit", 95))
+        self.card_ram.set_thresholds(self.config.get("ram_warn", 80), self.config.get("ram_crit", 92))
+        self.gauge.set_thresholds(self.config.get("gpu_warn", 75), self.config.get("gpu_crit", 85))
+
+        # visibility
+        self.card_cpu.setVisible(self.config.get("show_cpu", True))
+        self.card_ram.setVisible(self.config.get("show_ram", True))
+        self.gauge.setVisible(self.config.get("show_gpu", True))
         self.card_cpu.set_sparkline_visible(show_spark)
         self.card_ram.set_sparkline_visible(show_spark)
-
-        self.lbl_net.setVisible(bool(self.config.get("show_network_rate", True)))
+        self.lbl_net.setVisible(bool(self.config.get("show_network", True)))
+        self.lbl_music.setVisible(bool(self.config.get("show_music", True)))
+        self.visualizer.setVisible(bool(self.config.get("show_visualizer", True)))
         self.lbl_ai.setVisible(bool(self.config.get("show_ai", True)))
 
-        self.panel.set_accent(accent)
+        # chips
+        self.chip_battery.setVisible(bool(self.config.get("show_battery", True)))
+        self.chip_cpu_temp.setVisible(bool(self.config.get("show_cpu_temp", True)))
+        self.chip_disk.setVisible(bool(self.config.get("show_disk_io", True)))
+        any_chip = any([self.chip_battery.isVisible(), self.chip_cpu_temp.isVisible(), self.chip_disk.isVisible()])
+        self._chips_wrapper.setVisible(any_chip)
+
+        # flair
+        self.panel.set_animated_border(bool(self.config.get("animated_border", True)))
         self.panel.set_background_image(self.config.get("bg_image", ""))
         self.panel.set_unlocked(not self.is_locked)
+        self.particles.set_enabled(bool(self.config.get("particles", True)))
+
+        # font scale
+        scale = float(self.config.get("font_scale", 1.0))
+        self.lbl_title.setFont(self._scaled_title_font(scale))
 
         self._resize_for_mode()
+
+    def _scaled_title_font(self, scale: float) -> QFont:
+        f = QFont("Segoe UI", max(8, int(12 * scale)))
+        f.setWeight(QFont.Weight.Black)
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.0 * scale)
+        return f
 
     # ---------- drag ----------
     def mousePressEvent(self, event):
@@ -1675,7 +2324,6 @@ class PhantomOverlay(QMainWindow):
             self.tray_icon.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
 
         self.tray_menu = QMenu()
-
         self.lock_action = QAction("🛠 Режим перетаскивания", self)
         self.lock_action.triggered.connect(self.toggle_lock)
         self.tray_menu.addAction(self.lock_action)
@@ -1689,23 +2337,27 @@ class PhantomOverlay(QMainWindow):
         music_play = QAction("⏯ Play / Pause", self)
         music_play.triggered.connect(lambda: self._safe_media_key("play/pause media"))
         self.tray_menu.addAction(music_play)
-
-        music_next = QAction("⏭ Следующий трек", self)
+        music_next = QAction("⏭ Следующий", self)
         music_next.triggered.connect(lambda: self._safe_media_key("next track"))
         self.tray_menu.addAction(music_next)
-
-        music_prev = QAction("⏮ Предыдущий трек", self)
+        music_prev = QAction("⏮ Предыдущий", self)
         music_prev.triggered.connect(lambda: self._safe_media_key("previous track"))
         self.tray_menu.addAction(music_prev)
 
         self.tray_menu.addSeparator()
+
+        presets_menu = QMenu("🎭 Тема", self.tray_menu)
+        for name in THEME_PRESETS.keys():
+            act = QAction(name, self); act.triggered.connect(lambda _c=False, n=name: self._apply_theme_preset(n))
+            presets_menu.addAction(act)
+        self.tray_menu.addMenu(presets_menu)
+
         self.tray_menu.addAction(QAction("⚙ Настройки", self, triggered=self.open_settings))
         self.tray_menu.addAction(QAction("❌ Выход", self, triggered=self._quit_app))
 
         self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
-
         self.rebuild_tray_menu_styles()
 
     def rebuild_tray_menu_styles(self) -> None:
@@ -1726,6 +2378,17 @@ class PhantomOverlay(QMainWindow):
             """
         )
 
+    def _apply_theme_preset(self, name: str) -> None:
+        preset = THEME_PRESETS.get(name)
+        if not preset:
+            return
+        for k, v in preset.items():
+            self.config[k] = v
+        self.config["theme_preset"] = name
+        save_config(self.config)
+        self.apply_config()
+        self.rebuild_tray_menu_styles()
+
     def _on_tray_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.toggle_signal.emit()
@@ -1739,8 +2402,7 @@ class PhantomOverlay(QMainWindow):
     def _quit_app(self) -> None:
         try:
             if hasattr(self, "monitor_thread"):
-                self.monitor_thread.stop()
-                self.monitor_thread.wait(2000)
+                self.monitor_thread.stop(); self.monitor_thread.wait(2000)
         except Exception as e:
             log_err("quit.thread", e)
         QApplication.instance().quit()
@@ -1760,105 +2422,113 @@ class PhantomOverlay(QMainWindow):
     # ---------- uptime ----------
     def _refresh_uptime(self) -> None:
         secs = int(time.time() - self._start_time)
-        h, rem = divmod(secs, 3600)
-        m, s = divmod(rem, 60)
+        h, rem = divmod(secs, 3600); m, s = divmod(rem, 60)
         if h:
             self.lbl_uptime.setText(f"⏱ {h:02d}:{m:02d}:{s:02d}")
         else:
             self.lbl_uptime.setText(f"⏱ {m:02d}:{s:02d}")
 
     # ---------- data ----------
-    def update_ui(self, data):
+    def update_ui(self, data: dict):
         accent = self.config.get("accent_color", "#00ff99")
 
         gpu_temp = data.get("gpu_temp")
         gpu_util = data.get("gpu_util")
+        gpu_crit = int(self.config.get("gpu_crit", 85))
+        gpu_warn = int(self.config.get("gpu_warn", 75))
 
-        # ----- GPU gauge -----
         self.gauge.set_values(gpu_temp, gpu_util)
 
+        # critical state for panel (red pulsing overlay)
+        critical_now = False
         if isinstance(gpu_temp, int):
-            if gpu_temp > 82:
-                self.status_dot.set_color("#ff5c5c")
+            if gpu_temp > gpu_crit:
+                self.status_dot.set_color("#ff5c5c"); critical_now = True
                 if self.config.get("enable_voice", True):
                     self.core.say("Внимание! Видеокарта перегревается.")
-            elif gpu_temp > 75:
+            elif gpu_temp > gpu_warn:
                 self.status_dot.set_color("#ffcc66")
             else:
                 self.status_dot.set_color(accent)
         else:
             self.status_dot.set_color(accent)
+        self.panel.set_critical(critical_now)
 
-        # ----- CPU card -----
+        # CPU
         cpu = float(data.get("cpu", 0) or 0)
         try:
             cpu_freq = psutil.cpu_freq()
-            freq_text = f"{cpu_freq.current/1000:.2f} GHz" if cpu_freq else ""
+            freq_text = f"{cpu_freq.current/1000:.2f} GHz" if cpu_freq else "загрузка"
         except Exception:
-            freq_text = ""
-        self.card_cpu.set_value(
-            cpu, f"{cpu:.0f}%",
-            secondary=freq_text or "загрузка",
-            critical=cpu >= 95,
-        )
+            freq_text = "загрузка"
+        self.card_cpu.set_value(cpu, f"{cpu:.0f}%", secondary=freq_text,
+                                critical_override=cpu >= self.config.get("cpu_crit", 95))
 
-        # ----- RAM card -----
+        # RAM
         ram = float(data.get("ram", 0) or 0)
         try:
             vm = psutil.virtual_memory()
-            gb_used = vm.used / (1024 ** 3)
-            gb_total = vm.total / (1024 ** 3)
-            ram_sec = f"{gb_used:.1f} / {gb_total:.1f} GB"
+            ram_sec = f"{vm.used/(1024**3):.1f} / {vm.total/(1024**3):.1f} GB"
         except Exception:
             ram_sec = "память"
-        self.card_ram.set_value(
-            ram, f"{ram:.0f}%",
-            secondary=ram_sec,
-            critical=ram >= 92,
-        )
+        self.card_ram.set_value(ram, f"{ram:.0f}%", secondary=ram_sec,
+                                critical_override=ram >= self.config.get("ram_crit", 92))
 
-        # ----- NET / PING -----
+        # CHIPS: battery / cpu_temp / disk
+        bat = data.get("battery_percent")
+        bat_plugged = data.get("battery_plugged")
+        if isinstance(bat, int):
+            icon = "🔌" if bat_plugged else "🔋"
+            self.chip_battery.setText(f"{icon} {bat}%")
+        else:
+            self.chip_battery.setText("🔋 —")
+
+        cpu_t = data.get("cpu_temp")
+        if isinstance(cpu_t, int):
+            self.chip_cpu_temp.setText(f"🌡 CPU {cpu_t}°")
+        else:
+            self.chip_cpu_temp.setText("🌡 CPU —")
+
+        read = float(data.get("disk_read", 0.0) or 0.0)
+        write = float(data.get("disk_write", 0.0) or 0.0)
+        self.chip_disk.setText(f"💽 R {_fmt_bytes(read)}/s · W {_fmt_bytes(write)}/s")
+
+        # NET
         ping_val = data.get("ping")
         up = float(data.get("net_up", 0.0) or 0.0)
         down = float(data.get("net_down", 0.0) or 0.0)
         ping_text = f"{ping_val} ms" if isinstance(ping_val, int) else "—"
         ping_color = accent
         if isinstance(ping_val, int):
-            if ping_val > 120:
-                ping_color = "#ff5c5c"
-            elif ping_val > 60:
-                ping_color = "#ffcc66"
-        self.lbl_net.setText(
-            f"🌐  {ping_text}   ·   ↑ {up:5.0f} KB/s   ·   ↓ {down:5.0f} KB/s"
-        )
+            if ping_val > self.config.get("ping_crit", 120): ping_color = "#ff5c5c"
+            elif ping_val > self.config.get("ping_warn", 60): ping_color = "#ffcc66"
+        self.lbl_net.setText(f"🌐  {ping_text}   ·   ↑ {up:5.0f} KB/s   ·   ↓ {down:5.0f} KB/s")
         self.lbl_net.setStyleSheet(
-            f"color: {ping_color}; "
-            "background: rgba(255,255,255,10); "
-            "border: 1px solid rgba(255,255,255,20); "
-            "border-radius: 8px; padding: 4px 10px;"
+            f"color: {ping_color}; background: rgba(255,255,255,10); "
+            "border: 1px solid rgba(255,255,255,20); border-radius: 8px; padding: 4px 10px;"
         )
 
-        # ----- MUSIC -----
+        # MUSIC + visualizer
         music = (data.get("music", "") or "").strip()
         self.lbl_music.setText(f"🎵  {music}" if music else "🎵  —")
+        self.visualizer.set_active(bool(music) and "—" not in music[:2])
 
-        # ----- AI STATUS -----
+        # AI
         if self.config.get("show_ai", True):
-            ai_text = self._compose_ai_status(gpu_temp, cpu, ram, ping_val)
+            ai_text = self._compose_ai_status(gpu_temp, cpu, ram, ping_val, bat)
             if ai_text != self._prev_ai_text:
                 self._prev_ai_text = ai_text
                 self.lbl_ai.setText(ai_text)
 
-        # ----- DISCORD -----
+        # DISCORD (if enabled)
         try:
-            temp_str = f"{gpu_temp}°C" if isinstance(gpu_temp, int) else "N/A"
-            self.core.update_discord(
-                state=f"GPU: {temp_str}", details=(music[:35] or "—")
-            )
+            if self.config.get("discord_enabled"):
+                temp_str = f"{gpu_temp}°C" if isinstance(gpu_temp, int) else "N/A"
+                self.core.update_discord(state=f"GPU: {temp_str}", details=(music[:35] or "—"))
         except Exception as e:
             log_err("discord.update.ui", e)
 
-        # ----- SMART FOCUS -----
+        # SMART FOCUS
         if (
             self.config.get("smart_hide", False)
             and self.is_locked
@@ -1869,23 +2539,24 @@ class PhantomOverlay(QMainWindow):
             is_gaming = any(g in active for g in games)
             self.setVisible(is_gaming)
 
-    def _compose_ai_status(self, gpu_temp, cpu, ram, ping_val) -> str:
-        if isinstance(gpu_temp, int) and gpu_temp > 82:
+    def _compose_ai_status(self, gpu_temp, cpu, ram, ping_val, battery) -> str:
+        if isinstance(gpu_temp, int) and gpu_temp > self.config.get("gpu_crit", 85):
             return "🤖  Silphiette: перегрев GPU! Снизь нагрузку."
-        if cpu >= 95:
+        if cpu >= self.config.get("cpu_crit", 95):
             return "🤖  Silphiette: CPU на 100% — фоновые задачи?"
-        if ram >= 92:
+        if ram >= self.config.get("ram_crit", 92):
             return "🤖  Silphiette: память почти закончилась."
-        if isinstance(ping_val, int) and ping_val > 150:
+        if isinstance(ping_val, int) and ping_val > self.config.get("ping_crit", 120):
             return "🤖  Silphiette: сеть не в форме — высокий пинг."
+        if isinstance(battery, int) and battery <= 15:
+            return "🤖  Silphiette: батарея разряжается — подключи питание."
         return "🤖  Silphiette: система в норме."
 
     # ---------- shutdown ----------
     def closeEvent(self, event):
         try:
             if hasattr(self, "monitor_thread"):
-                self.monitor_thread.stop()
-                self.monitor_thread.wait(2000)
+                self.monitor_thread.stop(); self.monitor_thread.wait(2000)
         except Exception as e:
             log_err("close.thread", e)
         super().closeEvent(event)
