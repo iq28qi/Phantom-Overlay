@@ -1,0 +1,98 @@
+name: 🐛 Bug report / Баг
+description: Оверлей крашится, зависает, кривой рендер — расскажи подробнее.
+title: "[bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что находишь баги! Заполни форму — так я пойму проблему в 5 раз быстрее.
+        Если оверлей крашится с трейсбэком в консоли (`python phantom.py`) — скопируй его в поле «Logs».
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия Phantom Overlay
+      description: Видно в заголовке окна или в `Настройки → О программе`. Если запускаешь `.exe` — укажи дату релиза.
+      placeholder: "5.1.0 — Hyper+"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: ОС
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows (другая)
+        - Linux (эксперимент)
+        - Другое
+    validations:
+      required: true
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: Видеокарта
+      options:
+        - NVIDIA
+        - AMD
+        - Intel
+        - Integrated / не знаю
+    validations:
+      required: true
+
+  - type: dropdown
+    id: launch
+    attributes:
+      label: Как запускал
+      options:
+        - PhantomOverlay.exe (из релизов)
+        - python phantom.py
+        - build.bat
+        - PyInstaller локально
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: Что пошло не так
+      description: Опиши, что произошло и что ожидал увидеть.
+      placeholder: |
+        Оверлей показывает «N/A» для GPU temp, хотя у меня RTX 4070.
+        Ожидал цифру в градусах.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Шаги воспроизведения
+      description: 1-3-5-7… По пунктам, как получить этот баг.
+      placeholder: |
+        1. Запустил `python phantom.py`.
+        2. Открыл `Настройки → Дизайн` и выбрал пресет «Magma».
+        3. Оверлей завис на 5 сек и перестал обновляться.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи / трейсбэк
+      description: Скопируй сюда то, что печатает консоль (префиксы `[phantom][...]` и Python traceback).
+      render: shell
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Скриншот / видео
+      description: Перетащи картинку или GIF прямо в это поле.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Дополнительно
+      description: Антивирусы, экзотические конфиги мониторов, стриминг обс — всё, что может быть связано.

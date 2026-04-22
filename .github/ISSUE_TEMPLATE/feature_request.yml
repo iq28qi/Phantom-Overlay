@@ -1,0 +1,49 @@
+name: ✨ Feature request / Идея
+description: Предложи новую фичу, интеграцию или улучшение UX.
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за идею! Чем чётче «зачем» и «для какого сценария» — тем выше шанс, что фича быстро появится.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Проблема / мотивация
+      description: Что сейчас неудобно или невозможно? Какой сценарий игры/работы это бы улучшило?
+      placeholder: |
+        В CS2 я часто теряюсь, когда пинг скачет. Хочу слышать голосовое предупреждение,
+        если ping > 80 мс дольше 3 секунд подряд.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Предлагаемое решение
+      description: Как ты это видишь? UI? Настройка? Новый виджет / плагин / интеграция?
+      placeholder: |
+        Опцию в «Пороги»: `Голосовое предупреждение при высоком пинге` + порог в мс
+        + задержка подтверждения.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Что пробовал до этого? Какие сторонние инструменты решают задачу иначе?
+
+  - type: checkboxes
+    id: type
+    attributes:
+      label: Тип фичи
+      options:
+        - label: Новый виджет / метрика в оверлее
+        - label: Интеграция с внешним сервисом (GSI, Discord, OpenRGB, …)
+        - label: Кастомизация дизайна / тем
+        - label: Плагин / расширение через Python API
+        - label: Улучшение производительности
+        - label: Другое
