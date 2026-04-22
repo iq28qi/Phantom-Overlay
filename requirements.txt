@@ -1,0 +1,16 @@
+# Phantom Overlay — runtime dependencies
+# Tested with Python 3.12+
+
+PyQt6>=6.5
+psutil>=5.9
+ping3>=4.0
+pypresence>=4.3
+pygetwindow>=0.0.9
+pyttsx3>=2.90
+keyboard>=0.13.5
+
+# NVIDIA GPU telemetry (NVIDIA cards only; safe to omit on AMD/Intel)
+nvidia-ml-py>=12.535
+
+# Windows media integration (only needed on Windows)
+winsdk>=1.0 ; platform_system == "Windows"
