@@ -1,0 +1,53 @@
+{
+  "report": {
+    "timestamp": "2026-04-19 16:07:10",
+    "duration_sec": 2.5,
+    "samples": 3,
+    "cpu": {
+      "avg": 18.1,
+      "max": 22.7,
+      "1pct_low": 13.4
+    },
+    "gpu_temp": {
+      "avg": 45.0,
+      "max": 45,
+      "1pct_low": 45
+    },
+    "gpu_util": {
+      "avg": 7.7,
+      "max": 13,
+      "1pct_low": 5
+    },
+    "ping": {
+      "avg": 47.0,
+      "max": 50,
+      "1pct_low": 45
+    }
+  },
+  "samples": [
+    {
+      "t": 0.37,
+      "cpu": 18.2,
+      "ram": 61.7,
+      "gpu_temp": 45,
+      "gpu_util": 13,
+      "ping": 45
+    },
+    {
+      "t": 1.42,
+      "cpu": 22.7,
+      "ram": 61.7,
+      "gpu_temp": 45,
+      "gpu_util": 5,
+      "ping": 46
+    },
+    {
+      "t": 2.48,
+      "cpu": 13.4,
+      "ram": 61.7,
+      "gpu_temp": 45,
+      "gpu_util": 5,
+      "ping": 50
+    }
+  ]
+}

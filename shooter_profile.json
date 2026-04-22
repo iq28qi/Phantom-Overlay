@@ -1,0 +1,13 @@
+{
+    "name": "Shooter Mode",
+    "triggers": ["cs2", "valorant", "overwatch", "apex", "r5apex"],
+    "config_override": {
+        "crosshair_enabled": true,
+        "crosshair_color": "#ff3333",
+        "crosshair_size": 8,
+        "crosshair_thickness": 2,
+        "crosshair_gap": 3,
+        "opacity": 140,
+        "smart_hide": false
+    }
+}
