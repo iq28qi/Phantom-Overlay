@@ -26,12 +26,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QPoint, QPointF, QPropertyAnimation, QEasingCurve,
-    QRectF, QTimer, pyqtProperty
+    QRectF, QTimer, pyqtProperty, QObject, QEvent
 )
 from PyQt6.QtGui import (
     QAction, QIcon, QColor, QPainter, QLinearGradient, QRadialGradient,
-    QPen, QBrush, QPainterPath, QFont, QPixmap, QImage, QConicalGradient,
-    QKeySequence
+    QPen, QBrush, QPainterPath, QFont, QFontDatabase, QPixmap, QImage,
+    QConicalGradient, QKeySequence
 )
 
 try:
@@ -99,6 +99,8 @@ DEFAULT_CONFIG: dict = {
     "corner_radius": 18,             # 8 – 40 px
     "shadow_intensity": 48,          # 0 – 80
     "border_style": "solid",         # solid | dashed | neon | none
+    "color_mode": "steps",           # steps | gradient
+    "hover_microanim": True,
     "clock_seconds": True,
     # --- window sizing ---
     "window_mode": "auto",           # auto | xs | s | m | l | xl | fixed | free
@@ -452,6 +454,83 @@ def log_err(prefix: str, exc: BaseException) -> None:
         pass
 
 
+# ==========================================================
+#               ВШИТЫЕ ШРИФТЫ (bundled fonts)
+# ==========================================================
+# Значения по умолчанию — системные шрифты Windows.
+# После `load_bundled_fonts()` подменяются на Inter / JetBrains Mono,
+# если их .ttf лежат в папке `fonts/` рядом с phantom.py.
+UI_FONT_FAMILY: str = "Segoe UI"
+MONO_FONT_FAMILY: str = "Consolas"
+_FONTS_LOADED: bool = False
+
+
+def _bundled_fonts_dir() -> str:
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "fonts")
+
+
+def load_bundled_fonts() -> None:
+    """Регистрирует вшитые .ttf через QFontDatabase и обновляет UI/MONO family."""
+    global UI_FONT_FAMILY, MONO_FONT_FAMILY, _FONTS_LOADED
+    if _FONTS_LOADED:
+        return
+    fonts_dir = _bundled_fonts_dir()
+    if not os.path.isdir(fonts_dir):
+        _FONTS_LOADED = True
+        return
+
+    def _register(filename: str) -> str | None:
+        path = os.path.join(fonts_dir, filename)
+        if not os.path.exists(path):
+            return None
+        try:
+            fid = QFontDatabase.addApplicationFont(path)
+            if fid < 0:
+                return None
+            fams = QFontDatabase.applicationFontFamilies(fid)
+            return fams[0] if fams else None
+        except Exception as e:
+            log_err("fonts.register", e)
+            return None
+
+    try:
+        ui = _register("Inter.ttf")
+        if ui:
+            UI_FONT_FAMILY = ui
+        mono = _register("JetBrainsMono.ttf")
+        if mono:
+            MONO_FONT_FAMILY = mono
+    except Exception as e:
+        log_err("fonts.load", e)
+    _FONTS_LOADED = True
+
+
+def _qss_ui_font_family() -> str:
+    """Стилевое значение для `font-family` — кастомный первым, системный фолбэк."""
+    if UI_FONT_FAMILY != "Segoe UI":
+        return f"'{UI_FONT_FAMILY}', 'Segoe UI'"
+    return "'Segoe UI'"
+
+
+def _qss_mono_font_family() -> str:
+    if MONO_FONT_FAMILY != "Consolas":
+        return f"'{MONO_FONT_FAMILY}', 'Consolas'"
+    return "'Consolas'"
+
+
+# ==========================================================
+#               ЦВЕТОВОЙ РЕЖИМ (пороги / градиент)
+# ==========================================================
+_COLOR_MODE: str = "steps"  # steps | gradient
+
+
+def set_color_mode(mode: str) -> None:
+    """Переключить глобальный режим маппинга цвета по нагрузке."""
+    global _COLOR_MODE
+    _COLOR_MODE = mode if mode in ("steps", "gradient") else "steps"
+
+
 def load_config() -> dict:
     cfg = {**DEFAULT_CONFIG, "target_games": list(DEFAULT_CONFIG["target_games"])}
     if os.path.exists(CONFIG_FILE):
@@ -490,6 +569,12 @@ def _mix(c1: QColor, c2: QColor, t: float) -> QColor:
 def _color_for_load(percent: float, accent: QColor, warn: float = 70, crit: float = 90) -> QColor:
     yellow = QColor("#ffcc66")
     red = QColor("#ff5c5c")
+    if _COLOR_MODE == "gradient":
+        # Чистый линейный градиент accent → yellow → red по всему диапазону 0-100%.
+        t = max(0.0, min(1.0, float(percent) / 100.0))
+        if t < 0.5:
+            return _mix(accent, yellow, t * 2.0)
+        return _mix(yellow, red, (t - 0.5) * 2.0)
     if percent < warn:
         return _mix(accent, yellow, (percent / max(1.0, warn)) * 0.35)
     if percent < crit:
@@ -499,13 +584,24 @@ def _color_for_load(percent: float, accent: QColor, warn: float = 70, crit: floa
 
 def _color_for_temp(temp: int, accent: QColor, warn: int = 70, crit: int = 85) -> QColor:
     cool = QColor("#4cd9ff")
+    yellow = QColor("#ffcc66")
+    red = QColor("#ff5c5c")
+    if _COLOR_MODE == "gradient":
+        # Линейный градиент cool → accent → yellow → red от 20°C до crit+15°C.
+        lo, hi = 20.0, float(crit) + 15.0
+        t = max(0.0, min(1.0, (float(temp) - lo) / max(1.0, hi - lo)))
+        if t < 0.33:
+            return _mix(cool, accent, t / 0.33)
+        if t < 0.66:
+            return _mix(accent, yellow, (t - 0.33) / 0.33)
+        return _mix(yellow, red, (t - 0.66) / 0.34)
     if temp <= 45:
         return _mix(cool, accent, temp / 45.0)
     if temp <= warn:
         return accent
     if temp <= crit:
-        return _mix(accent, QColor("#ffcc66"), (temp - warn) / max(1, crit - warn))
-    return QColor("#ff5c5c")
+        return _mix(accent, yellow, (temp - warn) / max(1, crit - warn))
+    return red
 
 
 def _fmt_bytes(v: float) -> str:
@@ -515,6 +611,81 @@ def _fmt_bytes(v: float) -> str:
             return f"{v:.0f} {unit}" if unit == "B" else f"{v:.1f} {unit}"
         v /= 1024.0
     return f"{v:.1f} GB"
+
+
+# ==========================================================
+#              МИКРО-АНИМАЦИИ (hover lift)
+# ==========================================================
+class HoverGlow(QObject):
+    """
+    Цепляет к виджету QGraphicsDropShadowEffect с анимированным blurRadius
+    на `Enter` / `Leave`. Даёт ощущение «поднятой» карточки без изменений
+    layout'а. Работает через event-filter, чтобы не трогать paintEvent/enterEvent
+    виджета и не ломать его наследников.
+    """
+
+    _ENABLED: bool = True
+
+    def __init__(
+        self,
+        widget: QWidget,
+        accent: str = "#00ff99",
+        base_blur: float = 0.0,
+        hover_blur: float = 22.0,
+        duration_ms: int = 180,
+    ) -> None:
+        super().__init__(widget)
+        color = QColor(accent)
+        color.setAlpha(180)
+        self._effect = QGraphicsDropShadowEffect(widget)
+        self._effect.setColor(color)
+        self._effect.setBlurRadius(base_blur)
+        self._effect.setOffset(0, 0)
+        widget.setGraphicsEffect(self._effect)
+
+        self._anim = QPropertyAnimation(self._effect, b"blurRadius", self)
+        self._anim.setDuration(duration_ms)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._base_blur = float(base_blur)
+        self._hover_blur = float(hover_blur)
+        self._hovered = False
+        widget.installEventFilter(self)
+
+    @classmethod
+    def set_enabled(cls, enabled: bool) -> None:
+        """Глобально включить/выключить micro-animations (например, через настройки)."""
+        cls._ENABLED = bool(enabled)
+
+    def set_accent(self, accent: str) -> None:
+        color = QColor(accent)
+        color.setAlpha(180)
+        self._effect.setColor(color)
+
+    def set_blur_range(self, base: float, hover: float) -> None:
+        self._base_blur = float(base)
+        self._hover_blur = float(hover)
+        self._animate_to(self._hover_blur if self._hovered else self._base_blur)
+
+    def _animate_to(self, target: float) -> None:
+        if not HoverGlow._ENABLED:
+            self._anim.stop()
+            self._effect.setBlurRadius(self._base_blur)
+            return
+        self._anim.stop()
+        self._anim.setStartValue(self._effect.blurRadius())
+        self._anim.setEndValue(target)
+        self._anim.start()
+
+    def eventFilter(self, _obj, event):  # type: ignore[override]
+        t = event.type()
+        if t == QEvent.Type.Enter:
+            self._hovered = True
+            self._animate_to(self._hover_blur)
+        elif t == QEvent.Type.Leave:
+            self._hovered = False
+            self._animate_to(self._base_blur)
+        return False
 
 
 # ==========================================================
@@ -836,22 +1007,24 @@ class IconButton(QToolButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAutoRaise(True); self.setFixedSize(22, 22)
         self.setStyleSheet(
-            """
-            QToolButton {
+            f"""
+            QToolButton {{
                 color: rgba(255,255,255,160);
                 background: rgba(255,255,255,10);
                 border: 1px solid rgba(255,255,255,18);
                 border-radius: 6px;
-                font-family: 'Segoe UI'; font-weight: 800; font-size: 11px;
-            }
-            QToolButton:hover {
+                font-family: {_qss_ui_font_family()}; font-weight: 800; font-size: 11px;
+            }}
+            QToolButton:hover {{
                 color: #ffffff;
                 background: rgba(255,255,255,28);
                 border: 1px solid rgba(255,255,255,40);
-            }
-            QToolButton:pressed { background: rgba(255,255,255,48); }
+            }}
+            QToolButton:pressed {{ background: rgba(255,255,255,48); }}
             """
         )
+        # Лёгкий glow-lift при наведении.
+        self._hover_glow = HoverGlow(self, accent="#ffffff", base_blur=0.0, hover_blur=12.0, duration_ms=140)
 
 
 class Marquee(QLabel):
@@ -897,7 +1070,7 @@ class Chip(QLabel):
         super().__init__(parent)
         self._accent = "#00ff99"
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        f = QFont("Segoe UI", 9); f.setWeight(QFont.Weight.ExtraBold)
+        f = QFont(UI_FONT_FAMILY, 9); f.setWeight(QFont.Weight.ExtraBold)
         self.setFont(f)
         self._refresh()
 
@@ -932,6 +1105,8 @@ class MetricCard(QWidget):
         self._anim.setDuration(500)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._build_ui(show_sparkline)
+        # Мягкий glow-lift при наведении на карточку.
+        self._hover_glow = HoverGlow(self, accent=accent, base_blur=0.0, hover_blur=26.0, duration_ms=220)
 
     def get_animated_value(self) -> float: return self._value_anim
     def set_animated_value(self, v: float) -> None:
@@ -947,22 +1122,22 @@ class MetricCard(QWidget):
         top = QHBoxLayout(); top.setContentsMargins(0, 0, 0, 0); top.setSpacing(8)
 
         self.lbl_icon = QLabel(self._icon)
-        self.lbl_icon.setStyleSheet("font-family: 'Segoe UI'; font-size: 14px;")
+        self.lbl_icon.setStyleSheet("font-family: 'Inter', 'Segoe UI'; font-size: 14px;")
         self.lbl_name = QLabel(self._name)
         self.lbl_name.setStyleSheet(
-            "color: rgba(255,255,255,170); font-family: 'Segoe UI'; "
+            "color: rgba(255,255,255,170); font-family: 'Inter', 'Segoe UI'; "
             "font-size: 10px; font-weight: 800; letter-spacing: 1.8px;"
         )
         self.lbl_value = QLabel("--")
         self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-        f = QFont("Segoe UI", 15); f.setWeight(QFont.Weight.Black)
+        f = QFont(UI_FONT_FAMILY, 15); f.setWeight(QFont.Weight.Black)
         self.lbl_value.setFont(f)
         self.lbl_value.setStyleSheet(f"color: {self._accent.name()};")
 
         self.lbl_secondary = QLabel("")
         self.lbl_secondary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_secondary.setStyleSheet(
-            "color: rgba(255,255,255,120); font-family: 'Segoe UI'; "
+            "color: rgba(255,255,255,120); font-family: 'Inter', 'Segoe UI'; "
             "font-size: 10px; font-weight: 600;"
         )
 
@@ -985,6 +1160,8 @@ class MetricCard(QWidget):
         self._accent = QColor(color)
         self.sparkline.set_color(color)
         self._refresh_value_style()
+        if hasattr(self, "_hover_glow"):
+            self._hover_glow.set_accent(color)
         self.update()
 
     def set_sparkline_visible(self, visible: bool) -> None:
@@ -1126,12 +1303,12 @@ class CircularGauge(QWidget):
         p.drawArc(rect, start_angle, span)
 
         p.setPen(QColor(255, 255, 255, 240))
-        fb = QFont("Segoe UI", 18); fb.setWeight(QFont.Weight.Black); p.setFont(fb)
+        fb = QFont(UI_FONT_FAMILY, 18); fb.setWeight(QFont.Weight.Black); p.setFont(fb)
         txt = f"{self._temp}°" if self._available else "N/A"
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, txt)
 
         p.setPen(QColor(255, 255, 255, 130))
-        fl = QFont("Segoe UI", 8); fl.setWeight(QFont.Weight.ExtraBold)
+        fl = QFont(UI_FONT_FAMILY, 8); fl.setWeight(QFont.Weight.ExtraBold)
         fl.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.0)
         p.setFont(fl)
         p.drawText(QRectF(rect.left(), rect.bottom() - 26, rect.width(), 14),
@@ -1282,7 +1459,7 @@ class ClockWidget(QLabel):
         self._accent = accent
         self._seconds = show_seconds
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        f = QFont("Consolas", 14); f.setWeight(QFont.Weight.Black)
+        f = QFont(MONO_FONT_FAMILY, 14); f.setWeight(QFont.Weight.Black)
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.0)
         self.setFont(f)
         self._apply_style()
@@ -1317,7 +1494,7 @@ class PeakValuesWidget(QLabel):
         super().__init__(parent)
         self._accent = accent
         self._cpu = 0.0; self._ram = 0.0; self._gpu_t = 0.0; self._ping = 0.0
-        f = QFont("Consolas", 9); f.setWeight(QFont.Weight.DemiBold)
+        f = QFont(MONO_FONT_FAMILY, 9); f.setWeight(QFont.Weight.DemiBold)
         self.setFont(f)
         self._apply_style()
         self._refresh()
@@ -1432,7 +1609,7 @@ class ThresholdEditor(QWidget):
 
         title_lbl = QLabel(title); title_lbl.setObjectName("threshold_section")
         title_lbl.setStyleSheet(
-            "QLabel { color: #ffffff; font-family: 'Segoe UI'; font-size: 12px; "
+            "QLabel { color: #ffffff; font-family: 'Inter', 'Segoe UI'; font-size: 12px; "
             "font-weight: 900; letter-spacing: 0.8px; background: transparent; }"
         )
         root.addWidget(title_lbl)
@@ -1451,11 +1628,11 @@ class ThresholdEditor(QWidget):
     def _row(self, label: str, value: int, vmin: int, vmax: int, color: str):
         row = QHBoxLayout(); row.setSpacing(8)
         lbl = QLabel(label); lbl.setFixedWidth(90)
-        lbl.setStyleSheet(f"color: {color}; font-family: 'Segoe UI'; font-size: 11px; font-weight: 900; background: transparent;")
+        lbl.setStyleSheet(f"color: {color}; font-family: 'Inter', 'Segoe UI'; font-size: 11px; font-weight: 900; background: transparent;")
         s = QSlider(Qt.Orientation.Horizontal); s.setRange(vmin, vmax); s.setValue(int(value))
         val = QLabel(f"{value}{self._unit}"); val.setFixedWidth(52)
         val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        val.setStyleSheet("color: #ffffff; font-family: 'Segoe UI'; font-weight: 900; font-size: 12px; background: transparent;")
+        val.setStyleSheet("color: #ffffff; font-family: 'Inter', 'Segoe UI'; font-weight: 900; font-size: 12px; background: transparent;")
         s.valueChanged.connect(lambda v, lb=val: lb.setText(f"{v}{self._unit}"))
         row.addWidget(lbl); row.addWidget(s, 1); row.addWidget(val)
         return s, val, row
@@ -1479,6 +1656,11 @@ class PresetCard(QPushButton):
         self.setCheckable(True)
         self.setMinimumHeight(76); self.setMinimumWidth(150)
         self._refresh_style()
+        # Glow-lift по цвету пресета, чтобы подсветка совпадала с акцентом карточки.
+        self._hover_glow = HoverGlow(
+            self, accent=str(preset.get("accent_color", "#00ff99")),
+            base_blur=0.0, hover_blur=24.0, duration_ms=200,
+        )
 
     def _refresh_style(self) -> None:
         accent = self._preset.get("accent_color", "#00ff99")
@@ -1491,7 +1673,7 @@ class PresetCard(QPushButton):
                 border-radius: 12px;
                 text-align: left;
                 padding: 10px 12px 10px 44px;
-                font-family: 'Segoe UI'; font-weight: 900; font-size: 12px;
+                font-family: 'Inter', 'Segoe UI'; font-weight: 900; font-size: 12px;
                 letter-spacing: 0.6px;
             }}
             QPushButton:hover {{
@@ -1522,7 +1704,7 @@ class PresetCard(QPushButton):
         p.drawEllipse(QPointF(22, self.height()/2), 9, 9)
         # subtitle
         p.setPen(QColor(255,255,255,130))
-        sub_font = QFont("Segoe UI", 8); sub_font.setWeight(QFont.Weight.DemiBold)
+        sub_font = QFont(UI_FONT_FAMILY, 8); sub_font.setWeight(QFont.Weight.DemiBold)
         p.setFont(sub_font)
         p.drawText(QRectF(44, self.height()/2 + 4, self.width()-48, 18),
                    Qt.AlignmentFlag.AlignLeft,
@@ -1549,7 +1731,7 @@ class LivePreview(QFrame):
         header = QHBoxLayout(); header.setSpacing(6)
         self.dot = StatusDot()
         self.lbl_title = QLabel("PHANTOM · LIVE")
-        tf = QFont("Segoe UI", 10); tf.setWeight(QFont.Weight.Black)
+        tf = QFont(UI_FONT_FAMILY, 10); tf.setWeight(QFont.Weight.Black)
         tf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2.5)
         self.lbl_title.setFont(tf)
         self.lbl_title.setStyleSheet("color: #ffffff;")
@@ -1658,11 +1840,16 @@ class LivePreview(QFrame):
 class GlassPanel(QWidget):
     """Премиум-фон: градиент + glow + шум + опциональный вращающийся conic-бордер."""
 
+    # Общий для всех инстансов тайл шума. Генерируется один раз и тайлится через
+    # QBrush — это на порядки дешевле, чем регенерировать per-pixel при каждом
+    # ресайзе окна.
+    _NOISE_TILE: QPixmap | None = None
+    _NOISE_TILE_SIZE: int = 256
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._accent = QColor("#00ff99")
         self._bg_pixmap: QPixmap | None = None
-        self._noise: QPixmap | None = None
         self._unlocked = False
         self._border_angle = 0.0
         self._animated_border = True
@@ -1712,18 +1899,23 @@ class GlassPanel(QWidget):
         if self._animated_border:
             self.update()
 
-    def _make_noise(self, w: int, h: int) -> QPixmap:
-        if self._noise is not None and self._noise.width() == w and self._noise.height() == h:
-            return self._noise
-        img = QImage(w, h, QImage.Format.Format_ARGB32)
+    @classmethod
+    def _get_noise_tile(cls) -> QPixmap:
+        """Лениво собираем один бесшовный тайл шума и переиспользуем его повсюду."""
+        if cls._NOISE_TILE is not None and not cls._NOISE_TILE.isNull():
+            return cls._NOISE_TILE
+        size = cls._NOISE_TILE_SIZE
+        img = QImage(size, size, QImage.Format.Format_ARGB32)
         img.fill(Qt.GlobalColor.transparent)
         rnd = random.Random(42)
-        for _ in range(w * h // 28):
-            x = rnd.randint(0, w - 1); y = rnd.randint(0, h - 1)
+        # Плотность подобрана так, чтобы итоговая картинка выглядела идентично
+        # старому варианту (~1 пиксель на каждые 28 пикселей площади).
+        for _ in range(size * size // 28):
+            x = rnd.randint(0, size - 1); y = rnd.randint(0, size - 1)
             a = rnd.randint(6, 18)
             img.setPixelColor(x, y, QColor(255, 255, 255, a))
-        self._noise = QPixmap.fromImage(img)
-        return self._noise
+        cls._NOISE_TILE = QPixmap.fromImage(img)
+        return cls._NOISE_TILE
 
     def paintEvent(self, _event):
         p = QPainter(self)
@@ -1770,7 +1962,9 @@ class GlassPanel(QWidget):
             r_glow.setColorAt(0.0, r1); r_glow.setColorAt(1.0, r2)
             p.setBrush(QBrush(r_glow)); p.drawRect(self.rect())
 
-        p.drawPixmap(0, 0, self._make_noise(w, h))
+        # Тайлим один кэшированный пиксмап шума через QBrush —
+        # O(1) на отрисовку независимо от размера окна.
+        p.fillRect(self.rect(), QBrush(self._get_noise_tile()))
 
         p.setPen(QPen(QColor(255, 255, 255, 24), 1))
         p.drawLine(int(radius/2), 1, int(w - radius/2), 1)
@@ -2126,6 +2320,26 @@ class ModernSettings(QDialog):
         self.cb_clock_sec.setChecked(bool(self.config.get("clock_seconds", True)))
         self.cb_clock_sec.stateChanged.connect(lambda s: self._commit("clock_seconds", bool(s)))
         form.addRow("", self.cb_clock_sec)
+
+        # Цветовой режим (пороги vs градиент)
+        self.combo_color_mode = QComboBox()
+        self.combo_color_mode.addItem("Пороги (warn / crit)", "steps")
+        self.combo_color_mode.addItem("Плавный градиент", "gradient")
+        cm_idx = self.combo_color_mode.findData(self.config.get("color_mode", "steps"))
+        if cm_idx >= 0:
+            self.combo_color_mode.setCurrentIndex(cm_idx)
+        self.combo_color_mode.currentIndexChanged.connect(
+            lambda _i: self._commit("color_mode", str(self.combo_color_mode.currentData()))
+        )
+        form.addRow("Цвет метрик:", self.combo_color_mode)
+
+        # Микро-анимации hover (лёгкий glow-lift на карточках/кнопках)
+        self.cb_hover_anim = QCheckBox("Подсветка при наведении")
+        self.cb_hover_anim.setChecked(bool(self.config.get("hover_microanim", True)))
+        self.cb_hover_anim.stateChanged.connect(
+            lambda s: self._commit("hover_microanim", bool(s))
+        )
+        form.addRow("", self.cb_hover_anim)
 
         # bg image
         bg_row = QHBoxLayout()
@@ -2632,15 +2846,15 @@ class ModernSettings(QDialog):
             QWidget#side {{ background-color: #0e0e14; border-right: 1px solid #1a1a24; }}
             QWidget#preview_holder {{ background-color: #09090d; border-left: 1px solid #1a1a24; }}
             QStackedWidget#stack {{ background-color: #0b0b10; }}
-            QLabel {{ color: #c7cde3; font-family: 'Segoe UI'; font-size: 12px; font-weight: 600; background: transparent; }}
-            QLabel#page_title {{ color: #ffffff; font-family: 'Segoe UI'; font-size: 20px; font-weight: 900; letter-spacing: 0.6px; }}
+            QLabel {{ color: #c7cde3; font-family: 'Inter', 'Segoe UI'; font-size: 12px; font-weight: 600; background: transparent; }}
+            QLabel#page_title {{ color: #ffffff; font-family: 'Inter', 'Segoe UI'; font-size: 20px; font-weight: 900; letter-spacing: 0.6px; }}
             QLabel#page_subtitle {{ color: #8891b0; font-size: 11px; font-weight: 500; }}
-            QLabel#threshold_section {{ color: #ffffff; font-family: 'Segoe UI'; font-size: 12px; font-weight: 900; letter-spacing: 0.8px; }}
-            QLabel#brand {{ color: {accent}; font-family: 'Segoe UI'; font-size: 14px; font-weight: 900; letter-spacing: 2.5px; }}
+            QLabel#threshold_section {{ color: #ffffff; font-family: 'Inter', 'Segoe UI'; font-size: 12px; font-weight: 900; letter-spacing: 0.8px; }}
+            QLabel#brand {{ color: {accent}; font-family: 'Inter', 'Segoe UI'; font-size: 14px; font-weight: 900; letter-spacing: 2.5px; }}
             QLabel#brand_version {{ color: #8891b0; font-size: 10px; letter-spacing: 0.6px; font-weight: 600; }}
-            QLabel#live_title {{ color: #8891b0; font-family: 'Segoe UI'; font-size: 10px; font-weight: 900; letter-spacing: 2.2px; }}
+            QLabel#live_title {{ color: #8891b0; font-family: 'Inter', 'Segoe UI'; font-size: 10px; font-weight: 900; letter-spacing: 2.2px; }}
             QLabel#live_hint {{ color: #6b7596; font-size: 10px; font-weight: 500; }}
-            QListWidget#nav {{ background: transparent; color: #a8b2d1; font-family: 'Segoe UI';
+            QListWidget#nav {{ background: transparent; color: #a8b2d1; font-family: 'Inter', 'Segoe UI';
                 font-size: 12px; font-weight: 700; border: none; outline: 0; }}
             QListWidget#nav::item {{ padding: 10px 12px; border-radius: 8px; margin: 3px 0; }}
             QListWidget#nav::item:hover {{ background: rgba(255,255,255,10); color: #ffffff; }}
@@ -2649,7 +2863,7 @@ class ModernSettings(QDialog):
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
                 background-color: #14141c; color: {accent};
                 border: 1px solid #1f1f27; border-radius: 8px; padding: 7px 10px;
-                font-family: 'Segoe UI'; font-weight: 800; font-size: 12px; }}
+                font-family: 'Inter', 'Segoe UI'; font-weight: 800; font-size: 12px; }}
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
                 border: 1px solid {accent}; }}
             QComboBox::drop-down {{ border: none; width: 18px; }}
@@ -2663,19 +2877,19 @@ class ModernSettings(QDialog):
                 margin: -6px 0; border-radius: 9px; border: 2px solid {accent}; }}
             QPushButton {{ background-color: #14141c; color: {accent};
                 border: 1px solid rgba(255,255,255,24); border-radius: 10px;
-                padding: 7px 14px; font-weight: 800; font-family: 'Segoe UI'; }}
+                padding: 7px 14px; font-weight: 800; font-family: 'Inter', 'Segoe UI'; }}
             QPushButton:hover {{ background-color: rgba(0,255,153,18); border: 1px solid {accent}; }}
             QPushButton#done_btn {{ background-color: {accent}; color: #0b0b10; border: none; letter-spacing: 0.8px; }}
             QPushButton#done_btn:hover {{ background-color: rgba(255,255,255,230); color: #0b0b10; }}
             QPushButton#reset_btn {{ color: #ff8888; border-color: rgba(255,90,90,60); }}
             QPushButton#reset_btn:hover {{ background: rgba(255,90,90,30); border-color: #ff5c5c; color: #ffffff; }}
-            QCheckBox {{ color: #ffffff; font-family: 'Segoe UI'; font-size: 12px; spacing: 10px; background: transparent; }}
+            QCheckBox {{ color: #ffffff; font-family: 'Inter', 'Segoe UI'; font-size: 12px; spacing: 10px; background: transparent; }}
             QCheckBox::indicator {{ width: 38px; height: 20px; border-radius: 10px;
                 background-color: #1f1f27; border: 1px solid #2a2a36; }}
             QCheckBox::indicator:checked {{ background-color: {accent}; border: 1px solid {accent}; }}
             QListWidget {{ background-color: #14141c; color: #e6e9f2;
                 border: 1px solid #1f1f27; border-radius: 10px; padding: 6px;
-                font-family: 'Segoe UI'; font-size: 12px; }}
+                font-family: 'Inter', 'Segoe UI'; font-size: 12px; }}
             QListWidget::item {{ padding: 7px 10px; border-radius: 6px; }}
             QListWidget::item:selected {{ background: {accent}; color: #0b0b10; font-weight: 900; }}
             QTextEdit {{ background: transparent; border: none; }}
@@ -2767,11 +2981,11 @@ class PhantomOverlay(QMainWindow):
         header = QHBoxLayout(self.w_header); header.setContentsMargins(0,0,0,0); header.setSpacing(8)
         self.status_dot = StatusDot()
         self.lbl_title = QLabel("PHANTOM")
-        tfont = QFont("Segoe UI", 12); tfont.setWeight(QFont.Weight.Black)
+        tfont = QFont(UI_FONT_FAMILY, 12); tfont.setWeight(QFont.Weight.Black)
         tfont.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.0)
         self.lbl_title.setFont(tfont); self.lbl_title.setStyleSheet("color: #ffffff;")
         self.lbl_uptime = QLabel("00:00")
-        ufont = QFont("Consolas", 9); ufont.setWeight(QFont.Weight.DemiBold)
+        ufont = QFont(MONO_FONT_FAMILY, 9); ufont.setWeight(QFont.Weight.DemiBold)
         self.lbl_uptime.setFont(ufont)
         self.lbl_uptime.setStyleSheet(
             "color: rgba(255,255,255,140); background: rgba(255,255,255,14); "
@@ -2823,7 +3037,7 @@ class PhantomOverlay(QMainWindow):
 
         # --- Network ---
         self.lbl_net = QLabel()
-        nfont = QFont("Consolas", 9); nfont.setWeight(QFont.Weight.DemiBold)
+        nfont = QFont(MONO_FONT_FAMILY, 9); nfont.setWeight(QFont.Weight.DemiBold)
         self.lbl_net.setFont(nfont)
         self.lbl_net.setText("🌐  —  ·  ↑ 0 KB/s  ·  ↓ 0 KB/s")
         self.lbl_net.setStyleSheet(
@@ -2833,7 +3047,7 @@ class PhantomOverlay(QMainWindow):
 
         # --- Music ---
         self.lbl_music = Marquee()
-        mfont = QFont("Segoe UI", 10); mfont.setItalic(True); mfont.setWeight(QFont.Weight.Medium)
+        mfont = QFont(UI_FONT_FAMILY, 10); mfont.setItalic(True); mfont.setWeight(QFont.Weight.Medium)
         self.lbl_music.setFont(mfont)
         self.lbl_music.setStyleSheet("color: rgba(255,255,255,180);")
         self.lbl_music.setFixedHeight(18)
@@ -2841,7 +3055,7 @@ class PhantomOverlay(QMainWindow):
 
         # --- AI ---
         self.lbl_ai = QLabel("🤖  Silphiette: " + tr("working"))
-        afont = QFont("Segoe UI", 10); afont.setWeight(QFont.Weight.DemiBold); afont.setItalic(True)
+        afont = QFont(UI_FONT_FAMILY, 10); afont.setWeight(QFont.Weight.DemiBold); afont.setItalic(True)
         self.lbl_ai.setFont(afont)
         self.lbl_ai.setStyleSheet("color: #ffcc66;")
         self.lbl_ai.setWordWrap(True)
@@ -3007,6 +3221,8 @@ class PhantomOverlay(QMainWindow):
 
     def apply_config(self):
         set_language(self.config.get("language", "ru"))
+        set_color_mode(str(self.config.get("color_mode", "steps")))
+        HoverGlow.set_enabled(bool(self.config.get("hover_microanim", True)))
         if not hasattr(self, "anim") or self.anim.state() != QPropertyAnimation.State.Running:
             self.setWindowOpacity(max(0.1, self.config["opacity"] / 255.0))
         accent = self.config.get("accent_color", "#00ff99")
@@ -3085,7 +3301,7 @@ class PhantomOverlay(QMainWindow):
         self._resize_for_mode()
 
     def _scaled_title_font(self, scale: float) -> QFont:
-        f = QFont("Segoe UI", max(8, int(12 * scale)))
+        f = QFont(UI_FONT_FAMILY, max(8, int(12 * scale)))
         f.setWeight(QFont.Weight.Black)
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3.0 * scale)
         return f
@@ -3189,7 +3405,7 @@ class PhantomOverlay(QMainWindow):
             }}
             QMenu::item {{
                 padding: 8px 26px; border-radius: 6px; margin: 2px 4px;
-                font-family: 'Segoe UI'; font-weight: 700;
+                font-family: 'Inter', 'Segoe UI'; font-weight: 700;
             }}
             QMenu::item:selected {{ background-color: {accent}; color: #0b0b10; font-weight: 900; }}
             QMenu::separator {{ height: 1px; background: #1f1f27; margin: 4px 10px; }}
@@ -3398,6 +3614,9 @@ if __name__ == "__main__":
     _install_excepthook()
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    # Регистрируем вшитые шрифты до построения UI, чтобы все QFont/styleSheet
+    # подтянули Inter / JetBrains Mono сразу при первой отрисовке.
+    load_bundled_fonts()
     overlay = PhantomOverlay()
     overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
     overlay.show()
