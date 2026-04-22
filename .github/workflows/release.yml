@@ -1,0 +1,68 @@
+name: Build & Release (Windows .exe)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional tag label to attach to the build (no release will be published)."
+        required: false
+        default: "manual"
+
+jobs:
+  build-windows:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.*
+
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --onefile --windowed `
+            --collect-all winsdk `
+            --add-data "fonts;fonts" `
+            --add-data "plugins;plugins" `
+            --icon "icon.ico" `
+            --name "PhantomOverlay" `
+            phantom.py
+
+      - name: List dist output
+        shell: pwsh
+        run: Get-ChildItem -Recurse dist | Format-Table -AutoSize
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhantomOverlay-windows-x64
+          path: dist/PhantomOverlay.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/PhantomOverlay.exe
+          draft: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

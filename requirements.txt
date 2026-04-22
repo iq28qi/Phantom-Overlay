@@ -1,16 +1,20 @@
-# Phantom Overlay — runtime dependencies
-# Tested with Python 3.12+
+# Phantom Overlay — runtime dependencies.
+# Версии пинуем верхней границей (`~=` / `<`), чтобы сломанные мажоры
+# (напр. psutil 6.0 или PyQt7) не поломали сборку без нашего ведома.
+# Точечные минорные апдейты внутри указанного мажора — безопасны.
+#
+# Тестировалось на Python 3.12.x.
 
-PyQt6>=6.5
-psutil>=5.9
-ping3>=4.0
-pypresence>=4.3
-pygetwindow>=0.0.9
-pyttsx3>=2.90
-keyboard>=0.13.5
+PyQt6>=6.5,<7
+psutil>=5.9,<7
+ping3>=4.0,<5
+pypresence>=4.3,<5
+pygetwindow>=0.0.9,<1
+pyttsx3>=2.90,<3
+keyboard>=0.13.5,<1
 
-# NVIDIA GPU telemetry (NVIDIA cards only; safe to omit on AMD/Intel)
-nvidia-ml-py>=12.535
+# NVIDIA GPU telemetry (только для NVIDIA-карт; на AMD/Intel не ломается — ловим ImportError).
+nvidia-ml-py>=12.535,<13
 
-# Windows media integration (only needed on Windows)
-winsdk>=1.0 ; platform_system == "Windows"
+# Windows Media Control API (Now Playing). Устанавливается только на Windows.
+winsdk>=1.0,<2 ; platform_system == "Windows"

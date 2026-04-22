@@ -692,6 +692,11 @@ class HoverGlow(QObject):
 #               ЯДРО АССИСТЕНТА / DISCORD
 # ==========================================================
 class PhantomCore:
+    """Голосовые алерты (pyttsx3), Discord RPC (pypresence) и управление медиа
+    через Windows SDK. Умеет безопасно деградировать, если какая-то из
+    подсистем недоступна на этой машине (например, AMD-карта без NVML или
+    не-Windows хост)."""
+
     def __init__(self):
         try:
             self.engine = pyttsx3.init()
@@ -743,6 +748,12 @@ class PhantomCore:
 #                 ПОТОК МОНИТОРИНГА ЖЕЛЕЗА
 # ==========================================================
 class HardwareMonitorThread(QThread):
+    """Фоновой поток сбора телеметрии: CPU/RAM/GPU/Temp/Disk/Net/Battery/Ping.
+
+    На каждой итерации эмитит :pyattr:`data_updated` со словарём значений,
+    который потребляет главный UI-поток. Любой сбой конкретного измерения
+    (NVML, sensors_temperatures, ping и т.д.) логируется, но не валит цикл."""
+
     data_updated = pyqtSignal(dict)
 
     def __init__(self, interval_ms: int = 1000, ping_host: str = "8.8.8.8"):
@@ -906,6 +917,9 @@ class HardwareMonitorThread(QThread):
 #                   ВИДЖЕТЫ: БАЗОВЫЕ
 # ==========================================================
 class Sparkline(QWidget):
+    """Мини-график на N точек с автоматическим глоу — рисуется ровно внутри
+    выделенного rect, без осей, подписей и прочего шума."""
+
     def __init__(self, capacity: int = 60, color: str = "#00ff99", parent=None):
         super().__init__(parent)
         self._buf: deque[float] = deque(maxlen=capacity)
@@ -970,6 +984,9 @@ class Sparkline(QWidget):
 
 
 class StatusDot(QWidget):
+    """Маленькая круглая «лампочка» состояния в заголовке: зелёная в норме,
+    жёлтая при warn, красная при crit."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._color = QColor("#00ff99")
@@ -1001,6 +1018,10 @@ class StatusDot(QWidget):
 
 
 class IconButton(QToolButton):
+    """Флэт-кнопка 22×22 с единственным глифом/эмодзи внутри. Стилизована
+    под header оверлея и использует :class:`HoverGlow` для мягкого lift'а
+    при наведении."""
+
     def __init__(self, glyph: str, tooltip: str, parent=None):
         super().__init__(parent)
         self.setText(glyph); self.setToolTip(tooltip)
@@ -1028,6 +1049,9 @@ class IconButton(QToolButton):
 
 
 class Marquee(QLabel):
+    """QLabel с горизонтальной прокруткой текста влево, когда строка не
+    помещается в видимую ширину. Используется для длинных названий треков."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._full = ""
@@ -1090,6 +1114,11 @@ class Chip(QLabel):
 #                 ВИДЖЕТЫ: МЕТРИКИ
 # ==========================================================
 class MetricCard(QWidget):
+    """Карточка метрики (CPU / RAM) с анимированным процентом, сопутствующим
+    текстом, опциональной sparkline-историей, HoverGlow-эффектом и цветовой
+    индикацией — steps или gradient, в зависимости от глобального режима
+    :data:`_COLOR_MODE`."""
+
     def __init__(self, icon: str, name: str, accent: str = "#00ff99",
                  show_sparkline: bool = True,
                  warn: float = 80.0, crit: float = 95.0, parent=None):
@@ -1237,6 +1266,9 @@ class MetricCard(QWidget):
 
 
 class CircularGauge(QWidget):
+    """Круговая индикация температуры/нагрузки GPU с центральной подписью и
+    мягким glow под дугу. Цвет дуги считается по :func:`_color_for_temp`."""
+
     def __init__(self, accent: str = "#00ff99",
                  warn: int = 75, crit: int = 85, parent=None):
         super().__init__(parent)
@@ -2008,6 +2040,12 @@ class GlassPanel(QWidget):
 #                   ДИАЛОГ НАСТРОЕК
 # ==========================================================
 class ModernSettings(QDialog):
+    """Phantom Control Center: sidebar-навигация + stacked страницы
+    («Основные», «Дизайн», «Раскладка», «Пресеты», «Пороги», «Игры»,
+    «О программе») с live preview. Все изменения коммитятся через
+    :meth:`_commit`, мгновенно пробрасываются в оверлей и автосохраняются
+    в ``phantom_config.json``."""
+
     def __init__(self, current_config: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Phantom Control Center")
@@ -2907,6 +2945,14 @@ class ModernSettings(QDialog):
 #                    ГЛАВНЫЙ ОВЕРЛЕЙ
 # ==========================================================
 class PhantomOverlay(QMainWindow):
+    """Главное окно оверлея.
+
+    Собирает все виджеты внутри :class:`GlassPanel`, запускает
+    :class:`HardwareMonitorThread`, слушает глобальные хоткеи через
+    ``keyboard``, управляет треем и Smart Focus (авто-скрытие вне игр).
+    Живёт поверх всех окон (WindowStaysOnTopHint) и перерисовывается
+    на каждое событие :pyattr:`HardwareMonitorThread.data_updated`."""
+
     toggle_signal = pyqtSignal()
     settings_signal = pyqtSignal()
 
